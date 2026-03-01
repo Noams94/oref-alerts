@@ -570,10 +570,16 @@ HTML = """<!DOCTYPE html>
   .filter-group input:focus { outline: none; border-color: #42a5f5; }
   .filter-group input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.8); }
 
-  /* Type chips */
-  .type-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
-  .type-chip { padding: 5px 13px; border-radius: 20px; font-size: .8rem; cursor: pointer; border: 2px solid transparent; transition: opacity .15s, border-color .15s; user-select: none; opacity: .3; }
-  .type-chip.active { opacity: 1; border-color: rgba(255,255,255,.25); }
+  /* Type multi-select */
+  #type-select {
+    background: #0d1b2a; border: 1px solid #1a3a5c; border-radius: 8px;
+    color: #e8eaf6; font-family: Arial, sans-serif; font-size: .85rem;
+    width: 100%; padding: 4px; min-height: 130px; resize: vertical;
+  }
+  #type-select option { padding: 6px 10px; cursor: pointer; }
+  #type-select option:checked { background: #1565c0; color: #fff; }
+  #type-select:focus { outline: none; border-color: #42a5f5; }
+  .type-select-hint { font-size: .73rem; color: #546e7a; margin-top: 5px; }
 
   /* Filter actions */
   .filter-actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
@@ -663,9 +669,12 @@ HTML = """<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="filter-group">
-      <label>סוגי התראות <span style="color:#37474f;font-size:.72rem">(לחץ לבחירה / ביטול בחירה)</span></label>
-      <div class="type-chips" id="type-chips">טוען...</div>
+    <div class="filter-group" style="width:100%">
+      <label>סוגי התראות</label>
+      <select multiple id="type-select" size="6">
+        <option value="" disabled>טוען...</option>
+      </select>
+      <div class="type-select-hint">Ctrl+לחיצה לבחירה מרובה &nbsp;·&nbsp; ללא בחירה = כל הסוגים</div>
     </div>
 
     <div class="filter-actions">
@@ -704,7 +713,6 @@ function colorFor(t) {
 
 /* ── Filter state ── */
 let allTypes = [];
-let selectedTypes = null;    // null = all
 let debounceTimer = null;
 let filterPanelOpen = true;
 
@@ -752,11 +760,13 @@ function buildFilterParams() {
   const from = document.getElementById("f-from").value;
   const to   = document.getElementById("f-to").value;
   const city = document.getElementById("f-city").value.trim();
+  const sel  = document.getElementById("type-select");
+  const chosen = sel ? [...sel.selectedOptions].map(o => o.value).filter(Boolean) : [];
   if (from) p.set("date_from", from);
   if (to)   p.set("date_to",   to);
   if (city) p.set("city",      city);
-  if (selectedTypes !== null && selectedTypes.size > 0)
-    p.set("types", [...selectedTypes].join(","));
+  if (chosen.length > 0 && chosen.length < allTypes.length)
+    p.set("types", chosen.join(","));
   return p;
 }
 
@@ -773,8 +783,8 @@ function clearFilters() {
   document.getElementById("f-from").value = "";
   document.getElementById("f-to").value   = "";
   document.getElementById("f-city").value = "";
-  selectedTypes = null;
-  document.querySelectorAll(".type-chip").forEach(c => c.classList.add("active"));
+  const sel = document.getElementById("type-select");
+  if (sel) [...sel.options].forEach(o => o.selected = false);
   applyFilters();
 }
 
@@ -790,28 +800,6 @@ function updateActiveTag(p) {
   tag.textContent = parts.length ? "· " + parts.join(" · ") : "";
 }
 
-/* ── Type chips ── */
-function toggleType(el, title) {
-  if (selectedTypes === null) {
-    selectedTypes = new Set(allTypes.map(t => t.title));
-    selectedTypes.delete(title);
-    document.querySelectorAll(".type-chip").forEach(c =>
-      c.classList.toggle("active", selectedTypes.has(c.dataset.title)));
-  } else if (selectedTypes.has(title)) {
-    selectedTypes.delete(title);
-    el.classList.remove("active");
-    if (selectedTypes.size === 0) {
-      selectedTypes = null;
-      document.querySelectorAll(".type-chip").forEach(c => c.classList.add("active"));
-    }
-  } else {
-    selectedTypes.add(title);
-    el.classList.add("active");
-    if (selectedTypes.size === allTypes.length) selectedTypes = null;
-  }
-  applyFilters();   // ← auto-apply on chip click
-}
-
 /* ── Load metadata ── */
 async function loadCities() {
   const cities = await fetch("/api/cities").then(r => r.json());
@@ -820,15 +808,14 @@ async function loadCities() {
 
 async function loadTypes() {
   allTypes = await fetch("/api/types").then(r => r.json());
-  const el = document.getElementById("type-chips");
-  if (!allTypes.length) { el.textContent = "אין נתונים עדיין"; return; }
-  el.innerHTML = allTypes.map(t => {
-    const hex = TYPE_COLORS[t.category] || "AAAAAA";
-    const cnt = t.total ? ` <span style="opacity:.5;font-size:.7rem">(${t.total.toLocaleString()})</span>` : "";
-    return `<span class="type-chip active"
-      style="background:#${hex}28;color:#${hex};border-color:#${hex}50"
-      data-title="${esc(t.title)}"
-      onclick="toggleType(this,'${esc(t.title)}')">${esc(t.title)}${cnt}</span>`;
+  const sel = document.getElementById("type-select");
+  if (!allTypes.length) {
+    sel.innerHTML = '<option value="" disabled>אין נתונים עדיין</option>';
+    return;
+  }
+  sel.innerHTML = allTypes.map(t => {
+    const cnt = t.total ? ` (${t.total.toLocaleString()})` : "";
+    return `<option value="${esc(t.title)}">${esc(t.title)}${cnt}</option>`;
   }).join("");
 }
 
@@ -889,6 +876,7 @@ function debouncedApply() {
 document.getElementById("f-from").addEventListener("change", debouncedApply);
 document.getElementById("f-to").addEventListener("change",   debouncedApply);
 document.getElementById("f-city").addEventListener("input",  debouncedApply);
+document.getElementById("type-select").addEventListener("change", applyFilters);
 
 /* ── Init ── */
 let cd = 15;
