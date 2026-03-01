@@ -16,7 +16,7 @@ from datetime import datetime
 from collections import Counter, defaultdict
 
 import requests
-from flask import Flask, send_file, jsonify, render_template_string
+from flask import Flask, send_file, jsonify, render_template_string, request
 import openpyxl
 from openpyxl.styles import (
     Font, PatternFill, Alignment, Border, Side
@@ -173,25 +173,54 @@ def query_alerts(where="", params=()):
             params
         ).fetchall()
 
-def get_stats():
+def get_stats(where="", params=()):
     with get_db() as conn:
-        total   = conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+        total   = conn.execute(
+            f"SELECT COUNT(*) FROM alerts {where}", params).fetchone()[0]
         cities  = conn.execute(
-            "SELECT COUNT(DISTINCT city) FROM alerts").fetchone()[0]
+            f"SELECT COUNT(DISTINCT city) FROM alerts {where}", params).fetchone()[0]
         newest  = conn.execute(
-            "SELECT MAX(alert_dt) FROM alerts").fetchone()[0]
+            f"SELECT MAX(alert_dt) FROM alerts {where}", params).fetchone()[0]
         oldest  = conn.execute(
-            "SELECT MIN(alert_dt) FROM alerts").fetchone()[0]
+            f"SELECT MIN(alert_dt) FROM alerts {where}", params).fetchone()[0]
         by_title = conn.execute(
-            "SELECT title, COUNT(*) as n FROM alerts "
-            "GROUP BY title ORDER BY n DESC"
+            f"SELECT title, COUNT(*) as n FROM alerts {where} "
+            "GROUP BY title ORDER BY n DESC", params
         ).fetchall()
         top_cities = conn.execute(
-            "SELECT city, COUNT(*) as n FROM alerts "
-            "GROUP BY city ORDER BY n DESC LIMIT 10"
+            f"SELECT city, COUNT(*) as n FROM alerts {where} "
+            "GROUP BY city ORDER BY n DESC LIMIT 10", params
         ).fetchall()
     return dict(total=total, cities=cities, newest=newest,
                 oldest=oldest, by_title=by_title, top_cities=top_cities)
+
+
+def _parse_filters(args):
+    """Parse URL query params → (WHERE clause, params tuple)."""
+    clauses, params = [], []
+    date_from = args.get("date_from", "").strip()
+    date_to   = args.get("date_to",   "").strip()
+    city      = args.get("city",      "").strip()
+    types_raw = args.get("types",     "").strip()
+
+    if date_from:
+        clauses.append("alert_dt >= ?")
+        params.append(date_from + " 00:00:00")
+    if date_to:
+        clauses.append("alert_dt <= ?")
+        params.append(date_to   + " 23:59:59")
+    if city:
+        clauses.append("city LIKE ?")
+        params.append(f"%{city}%")
+    if types_raw:
+        types = [t.strip() for t in types_raw.split(",") if t.strip()]
+        if types:
+            placeholders = ",".join("?" * len(types))
+            clauses.append(f"title IN ({placeholders})")
+            params.extend(types)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, tuple(params)
 
 # ─── Collectors ───────────────────────────────────────────────────────────────
 _state = {
@@ -309,8 +338,8 @@ def _cell(ws, row, col, val, color=None, bold=False, wrap=False):
         c.fill = ALT_FILL
     return c
 
-def build_excel():
-    rows = query_alerts()
+def build_excel(where="", params=(), filter_info=None):
+    rows = query_alerts(where, params)
     wb   = openpyxl.Workbook()
 
     # ── Sheet 1: All alerts ──────────────────────────────────────────────────
@@ -380,7 +409,7 @@ def build_excel():
     ws3 = wb.create_sheet("סטטיסטיקות")
     ws3.sheet_view.rightToLeft = True
 
-    s   = get_stats()
+    s   = get_stats(where, params)
     row = 1
 
     def sect(text):
@@ -427,6 +456,8 @@ def build_excel():
     kv("התראה אחרונה", s["newest"] or "—")
     kv("עודכן לאחרונה",
        datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    if filter_info:
+        kv("פילטר מופעל", filter_info)
     row += 1
 
     sect("פירוט לפי סוג התראה")
@@ -487,16 +518,12 @@ HTML = """<!DOCTYPE html>
     padding: 24px;
   }
   header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 32px;
-    border-bottom: 2px solid #1f4e79;
-    padding-bottom: 16px;
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 28px;
+    border-bottom: 2px solid #1f4e79; padding-bottom: 16px;
   }
   .logo {
-    width: 54px; height: 54px;
-    background: #1f4e79;
+    width: 54px; height: 54px; background: #1f4e79;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-size: 28px;
@@ -504,112 +531,128 @@ HTML = """<!DOCTYPE html>
   h1 { font-size: 1.6rem; color: #90caf9; }
   h1 small { font-size: 0.85rem; color: #78909c; font-weight: normal; }
 
+  /* ── Cards ── */
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
-    margin-bottom: 32px;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px; margin-bottom: 24px;
   }
   .card {
-    background: #162032;
-    border: 1px solid #1f4e79;
-    border-radius: 12px;
-    padding: 20px;
-    text-align: center;
+    background: #162032; border: 1px solid #1f4e79;
+    border-radius: 12px; padding: 18px; text-align: center;
   }
-  .card .num  { font-size: 2.4rem; font-weight: bold; color: #42a5f5; }
-  .card .lbl  { font-size: 0.85rem; color: #78909c; margin-top: 4px; }
-  .card.green .num { color: #66bb6a; }
-  .card.red   .num { color: #ef5350; }
+  .card .num { font-size: 2.2rem; font-weight: bold; color: #42a5f5; }
+  .card .lbl { font-size: 0.82rem; color: #78909c; margin-top: 4px; }
+  .card.green  .num { color: #66bb6a; }
+  .card.red    .num { color: #ef5350; }
   .card.yellow .num { color: #ffa726; }
 
+  /* ── Status bar ── */
   .status-bar {
-    background: #162032;
-    border: 1px solid #1a3a5c;
-    border-radius: 8px;
-    padding: 12px 20px;
-    margin-bottom: 28px;
-    display: flex;
-    gap: 28px;
-    font-size: 0.85rem;
-    color: #78909c;
-    flex-wrap: wrap;
+    background: #162032; border: 1px solid #1a3a5c;
+    border-radius: 8px; padding: 10px 18px;
+    margin-bottom: 24px;
+    display: flex; gap: 24px; font-size: 0.83rem; color: #78909c; flex-wrap: wrap;
   }
   .status-bar span { display: flex; align-items: center; gap: 6px; }
   .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #66bb6a;
+    width: 8px; height: 8px; border-radius: 50%; background: #66bb6a;
     animation: pulse 2s infinite;
   }
-  @keyframes pulse {
-    0%,100% { opacity: 1; } 50% { opacity: 0.3; }
-  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
+  /* ── Filter Panel ── */
+  .filter-panel {
+    background: #162032; border: 1px solid #1f4e79;
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+  }
+  .filter-title {
+    font-size: 1rem; color: #90caf9; font-weight: bold;
+    margin-bottom: 16px; padding-bottom: 10px;
+    border-bottom: 1px solid #1a3a5c;
+  }
+  .filter-row {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 16px; align-items: flex-end;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; }
+  .filter-group label { font-size: 0.78rem; color: #78909c; }
+  .filter-group input[type="date"],
+  .filter-group input[type="text"] {
+    background: #0d1b2a; border: 1px solid #1a3a5c;
+    border-radius: 6px; color: #e8eaf6;
+    padding: 8px 11px; font-size: 0.88rem; font-family: Arial, sans-serif;
+  }
+  .filter-group input[type="date"] { min-width: 150px; }
+  .filter-group input[type="text"] { min-width: 200px; }
+  .filter-group input:focus { outline: none; border-color: #42a5f5; }
+  .filter-group input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.8); }
+
+  .type-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+  .type-chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 0.8rem;
+    cursor: pointer; border: 2px solid transparent;
+    transition: opacity .15s, border-color .15s;
+    user-select: none; opacity: .32;
+  }
+  .type-chip.active { opacity: 1; border-color: rgba(255,255,255,.28); }
+
+  .filter-actions {
+    display: flex; gap: 10px; margin-top: 16px;
+    align-items: center; flex-wrap: wrap;
+  }
+  .btn-apply {
+    padding: 8px 20px; background: #1565c0; color: #fff;
+    border: none; border-radius: 8px; cursor: pointer;
+    font-size: 0.88rem; font-weight: bold; font-family: Arial, sans-serif;
+  }
+  .btn-apply:hover { background: #1976d2; }
+  .btn-clear {
+    padding: 8px 14px; background: transparent; color: #78909c;
+    border: 1px solid #455a64; border-radius: 8px;
+    cursor: pointer; font-size: 0.84rem; font-family: Arial, sans-serif;
+  }
+  .btn-clear:hover { color: #e8eaf6; border-color: #78909c; }
+  .filter-summary { font-size: 0.8rem; color: #42a5f5; font-style: italic; }
+
+  /* ── Export button ── */
   .export-btn {
-    display: block;
-    width: 100%;
-    padding: 18px;
-    font-size: 1.3rem;
-    font-weight: bold;
+    display: block; width: 100%; padding: 17px;
+    font-size: 1.25rem; font-weight: bold;
     background: linear-gradient(135deg, #1565c0, #0d47a1);
-    color: #fff;
-    border: none;
-    border-radius: 12px;
-    cursor: pointer;
-    letter-spacing: 0.5px;
-    transition: all 0.2s;
-    margin-bottom: 20px;
-    text-decoration: none;
-    text-align: center;
+    color: #fff; border: none; border-radius: 12px;
+    cursor: pointer; letter-spacing: .5px; transition: all .2s;
+    margin-bottom: 20px; text-decoration: none; text-align: center;
   }
   .export-btn:hover {
     background: linear-gradient(135deg, #1976d2, #1565c0);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(21,101,192,0.5);
+    transform: translateY(-2px); box-shadow: 0 6px 20px rgba(21,101,192,.5);
   }
   .export-btn:active { transform: translateY(0); }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.88rem;
-    margin-top: 20px;
-  }
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; font-size: .87rem; margin-top: 18px; }
   thead th {
-    background: #1f4e79;
-    color: #fff;
-    padding: 10px 14px;
-    text-align: right;
-    font-weight: bold;
+    background: #1f4e79; color: #fff;
+    padding: 10px 14px; text-align: right; font-weight: bold;
   }
   tbody tr:nth-child(even) { background: #162032; }
   tbody tr:hover           { background: #1a3a5c; }
   tbody td { padding: 8px 14px; border-bottom: 1px solid #1a3a5c; }
 
   .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 0.78rem;
-    font-weight: bold;
-    color: #fff;
+    display: inline-block; padding: 2px 8px;
+    border-radius: 20px; font-size: .77rem; font-weight: bold; color: #fff;
   }
   .section-title {
-    font-size: 1.1rem;
-    color: #90caf9;
-    margin-bottom: 12px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #1f4e79;
+    font-size: 1.05rem; color: #90caf9; margin-bottom: 10px;
+    padding-bottom: 6px; border-bottom: 1px solid #1f4e79;
   }
-  #refresh-notice {
-    font-size: 0.78rem;
-    color: #546e7a;
-    text-align: center;
-    margin-top: 24px;
-  }
+  #refresh-notice { font-size: .77rem; color: #546e7a; text-align: center; margin-top: 22px; }
 </style>
 </head>
 <body>
+
 <header>
   <div class="logo">🛡️</div>
   <div>
@@ -619,70 +662,188 @@ HTML = """<!DOCTYPE html>
   </div>
 </header>
 
+<!-- Cards -->
 <div class="cards">
   <div class="card red">
-    <div class="num" id="total">—</div>
-    <div class="lbl">סה"כ התראות</div>
+    <div class="num" id="total">—</div><div class="lbl">סה"כ התראות</div>
   </div>
   <div class="card">
-    <div class="num" id="cities">—</div>
-    <div class="lbl">ישובים מושפעים</div>
+    <div class="num" id="cities">—</div><div class="lbl">ישובים מושפעים</div>
   </div>
   <div class="card yellow">
-    <div class="num" id="new_today">—</div>
-    <div class="lbl">חדשות מסשן זה</div>
+    <div class="num" id="new_today">—</div><div class="lbl">חדשות מסשן זה</div>
   </div>
   <div class="card green">
-    <div class="num" id="newest">—</div>
-    <div class="lbl">התראה אחרונה</div>
+    <div class="num" id="newest">—</div><div class="lbl">התראה אחרונה</div>
   </div>
 </div>
 
+<!-- Status bar -->
 <div class="status-bar">
   <span><span class="dot"></span> אוסף נתונים חיים</span>
-  <span>עדכון אחרון (live): <b id="last_live">—</b></span>
-  <span>עדכון אחרון (היסטוריה): <b id="last_history">—</b></span>
+  <span>עדכון (live): <b id="last_live">—</b></span>
+  <span>עדכון (היסטוריה): <b id="last_history">—</b></span>
   <span>שגיאות: <b id="errors">0</b></span>
 </div>
 
-<a href="/export" class="export-btn">⬇️ &nbsp; ייצא קובץ Excel עדכני</a>
+<!-- ── Filter Panel ──────────────────────────────────── -->
+<div class="filter-panel">
+  <div class="filter-title">🔍 סינון נתונים</div>
 
-<div class="section-title">10 התראות אחרונות</div>
+  <div class="filter-row">
+    <div class="filter-group">
+      <label>מתאריך</label>
+      <input type="date" id="f-from">
+    </div>
+    <div class="filter-group">
+      <label>עד תאריך</label>
+      <input type="date" id="f-to">
+    </div>
+    <div class="filter-group" style="flex:1;min-width:200px">
+      <label>יישוב</label>
+      <input type="text" id="f-city" list="city-list" placeholder="חפש שם יישוב...">
+      <datalist id="city-list"></datalist>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <label>סוגי התראות <span style="color:#546e7a;font-size:.73rem">(לחץ לבחירה/ביטול)</span></label>
+    <div class="type-chips" id="type-chips">טוען...</div>
+  </div>
+
+  <div class="filter-actions">
+    <button class="btn-apply" onclick="applyFilters()">🔄 עדכן תצוגה</button>
+    <button class="btn-clear" onclick="clearFilters()">✕ נקה הכל</button>
+    <span class="filter-summary" id="filter-summary"></span>
+  </div>
+</div>
+<!-- ──────────────────────────────────────────────────── -->
+
+<a id="export-btn" href="/export" class="export-btn">⬇️ &nbsp; ייצא קובץ Excel (לפי פילטר)</a>
+
+<div class="section-title">10 התראות אחרונות (לפי פילטר)</div>
 <table>
-  <thead>
-    <tr><th>זמן</th><th>ישוב</th><th>סוג</th></tr>
-  </thead>
+  <thead><tr><th>זמן</th><th>ישוב</th><th>סוג</th></tr></thead>
   <tbody id="recent"></tbody>
 </table>
 
 <div id="refresh-notice">מתרענן אוטומטית · <span id="countdown">15</span>ש</div>
 
 <script>
-const CAT_COLORS = {{ cat_colors | tojson }};
-const DEFAULT    = "#888";
+const TYPE_COLORS = {
+  1:"FF4444",2:"FF8800",3:"AA44FF",4:"4488FF",
+  5:"FF44AA",6:"FF6600",13:"44BB44",14:"FFCC00",15:"FF8844",101:"FF4444"
+};
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 function colorFor(title) {
-  // match by keyword
-  if (title.includes("רקטות") || title.includes("טילים")) return "#ef5350";
-  if (title.includes("ביטול") || title.includes("שגרה") || title.includes("לצאת")) return "#66bb6a";
-  if (title.includes("הנחיות") || title.includes("להישאר")) return "#ffa726";
+  if (title.includes("רקטות")||title.includes("טילים")) return "#ef5350";
+  if (title.includes("ביטול")||title.includes("שגרה")) return "#66bb6a";
+  if (title.includes("הנחיות")||title.includes("להישאר")) return "#ffa726";
   if (title.includes("כלי טיס")) return "#ff7043";
   return "#78909c";
 }
 
-async function refresh() {
+/* ── Filter state ── */
+let allTypes = [];
+let selectedTypes = null;   // null = כולם נבחרו
+
+function buildFilterParams() {
+  const p = new URLSearchParams();
+  const from = document.getElementById("f-from").value;
+  const to   = document.getElementById("f-to").value;
+  const city = document.getElementById("f-city").value.trim();
+  if (from) p.set("date_from", from);
+  if (to)   p.set("date_to",   to);
+  if (city) p.set("city",      city);
+  if (selectedTypes !== null && selectedTypes.size > 0)
+    p.set("types", [...selectedTypes].join(","));
+  return p;
+}
+
+function applyFilters() {
+  const p  = buildFilterParams();
+  const qs = p.toString() ? "?" + p.toString() : "";
+  document.getElementById("export-btn").href = "/export" + qs;
+  updateSummary(p);
+  refresh(p);
+}
+
+function clearFilters() {
+  document.getElementById("f-from").value = "";
+  document.getElementById("f-to").value   = "";
+  document.getElementById("f-city").value = "";
+  selectedTypes = null;
+  document.querySelectorAll(".type-chip").forEach(c => c.classList.add("active"));
+  applyFilters();
+}
+
+function updateSummary(p) {
+  const parts = [];
+  if (p.get("date_from")) parts.push("מ-" + p.get("date_from"));
+  if (p.get("date_to"))   parts.push("עד " + p.get("date_to"));
+  if (p.get("city"))      parts.push("יישוב: " + esc(p.get("city")));
+  if (p.get("types"))     parts.push(p.get("types").split(",").length + " סוגי התראות");
+  document.getElementById("filter-summary").textContent =
+    parts.length ? "פילטר פעיל: " + parts.join(" · ") : "";
+}
+
+function toggleType(el, title) {
+  if (selectedTypes === null) {
+    // מצב "הכל" → עובר למצב בחירה, שומר הכל פרט ללחוץ
+    selectedTypes = new Set(allTypes.map(t => t.title));
+    selectedTypes.delete(title);
+    document.querySelectorAll(".type-chip").forEach(c =>
+      c.classList.toggle("active", selectedTypes.has(c.dataset.title)));
+  } else if (selectedTypes.has(title)) {
+    selectedTypes.delete(title);
+    el.classList.remove("active");
+    if (selectedTypes.size === 0) {          // אפס נבחרו → חזור להכל
+      selectedTypes = null;
+      document.querySelectorAll(".type-chip").forEach(c => c.classList.add("active"));
+    }
+  } else {
+    selectedTypes.add(title);
+    el.classList.add("active");
+    if (selectedTypes.size === allTypes.length) selectedTypes = null; // הכל נבחר שוב
+  }
+}
+
+/* ── Load metadata ── */
+async function loadCities() {
+  const cities = await fetch("/api/cities").then(r => r.json());
+  document.getElementById("city-list").innerHTML =
+    cities.map(c => `<option value="${esc(c)}">`).join("");
+}
+
+async function loadTypes() {
+  allTypes = await fetch("/api/types").then(r => r.json());
+  const el = document.getElementById("type-chips");
+  if (!allTypes.length) { el.textContent = "אין נתונים עדיין"; return; }
+  el.innerHTML = allTypes.map(t => {
+    const hex = TYPE_COLORS[t.category] || "AAAAAA";
+    return `<span class="type-chip active"
+      style="background:#${hex}2a;color:#${hex};border-color:#${hex}55"
+      data-title="${esc(t.title)}"
+      onclick="toggleType(this,'${esc(t.title)}')">${esc(t.title)}</span>`;
+  }).join("");
+}
+
+/* ── Refresh ── */
+async function refresh(filterParams) {
+  const fp = filterParams || buildFilterParams();
+  const qs = fp.toString() ? "?" + fp.toString() : "";
   const [stats, state, recent] = await Promise.all([
-    fetch("/api/stats").then(r => r.json()),
+    fetch("/api/stats"  + qs).then(r => r.json()),
     fetch("/api/state").then(r => r.json()),
-    fetch("/api/recent").then(r => r.json()),
+    fetch("/api/recent" + qs).then(r => r.json()),
   ]);
 
-  document.getElementById("total").textContent   = stats.total.toLocaleString();
-  document.getElementById("cities").textContent  = stats.cities.toLocaleString();
+  document.getElementById("total").textContent     = stats.total.toLocaleString();
+  document.getElementById("cities").textContent    = stats.cities.toLocaleString();
   document.getElementById("new_today").textContent = state.new_today.toLocaleString();
-  document.getElementById("newest").textContent  =
-    stats.newest ? stats.newest.slice(11,16) : "—";
-
+  document.getElementById("newest").textContent    = stats.newest ? stats.newest.slice(11,16) : "—";
   document.getElementById("last_live").textContent    = state.last_live;
   document.getElementById("last_history").textContent = state.last_history;
   document.getElementById("errors").textContent       = state.live_errors;
@@ -693,21 +854,21 @@ async function refresh() {
     const color = colorFor(r.title);
     tbody.innerHTML += `<tr>
       <td>${r.alert_dt.slice(5,16)}</td>
-      <td>${r.city}</td>
-      <td><span class="badge" style="background:${color}">${r.title}</span></td>
+      <td>${esc(r.city)}</td>
+      <td><span class="badge" style="background:${color}">${esc(r.title)}</span></td>
     </tr>`;
   });
 }
 
-// Countdown timer
+/* ── Init ── */
 let cd = 15;
 setInterval(() => {
-  cd--;
-  document.getElementById("countdown").textContent = cd;
+  cd--; document.getElementById("countdown").textContent = cd;
   if (cd <= 0) { cd = 15; refresh(); }
 }, 1000);
 
-refresh();
+loadCities();
+loadTypes().then(() => refresh());
 </script>
 </body>
 </html>
@@ -719,7 +880,8 @@ def index():
 
 @app.route("/api/stats")
 def api_stats():
-    s = get_stats()
+    where, params = _parse_filters(request.args)
+    s = get_stats(where, params)
     return jsonify(
         total=s["total"],
         cities=s["cities"],
@@ -733,16 +895,46 @@ def api_state():
 
 @app.route("/api/recent")
 def api_recent():
-    rows = query_alerts()[:10]
+    where, params = _parse_filters(request.args)
+    rows = query_alerts(where, params)[:10]
     return jsonify([dict(r) for r in rows])
+
+@app.route("/api/cities")
+def api_cities():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT city FROM alerts ORDER BY city"
+        ).fetchall()
+    return jsonify([r["city"] for r in rows])
+
+@app.route("/api/types")
+def api_types():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT title, category FROM alerts ORDER BY title"
+        ).fetchall()
+    return jsonify([{"title": r["title"], "category": r["category"]} for r in rows])
 
 @app.route("/export")
 def export():
-    s     = get_stats()
+    args  = request.args
+    where, params = _parse_filters(args)
+
+    # תיאור פילטר לגיליון הסטטיסטיקות
+    parts = []
+    if args.get("date_from"): parts.append(f"מתאריך {args['date_from']}")
+    if args.get("date_to"):   parts.append(f"עד {args['date_to']}")
+    if args.get("city"):      parts.append(f"יישוב: {args['city']}")
+    if args.get("types"):
+        types_list = [t.strip() for t in args["types"].split(",") if t.strip()]
+        parts.append(f"סוגי התראות: {', '.join(types_list)}")
+    filter_info = " | ".join(parts) if parts else None
+
+    s     = get_stats(where, params)
     today = datetime.now().strftime("%d-%m-%Y")
     fname = f"התראות_פיקוד_העורף_{today}.xlsx"
-    buf   = build_excel()
-    log.info("Excel exported: %s (%d alerts)", fname, s["total"])
+    buf   = build_excel(where, params, filter_info)
+    log.info("Excel exported: %s (%d alerts, filter=%s)", fname, s["total"], bool(filter_info))
     return send_file(
         buf,
         as_attachment=True,
