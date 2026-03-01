@@ -510,144 +510,94 @@ HTML = """<!DOCTYPE html>
 <title>פיקוד העורף — ניטור התראות</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: Arial, sans-serif;
-    background: #0d1b2a;
-    color: #e8eaf6;
-    min-height: 100vh;
-    padding: 24px;
-  }
-  header {
-    display: flex; align-items: center; gap: 16px;
-    margin-bottom: 28px;
-    border-bottom: 2px solid #1f4e79; padding-bottom: 16px;
-  }
-  .logo {
-    width: 54px; height: 54px; background: #1f4e79;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 28px;
-  }
+  body { font-family: Arial, sans-serif; background: #0d1b2a; color: #e8eaf6; min-height: 100vh; padding: 24px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; border-bottom: 2px solid #1f4e79; padding-bottom: 16px; }
+  .logo { width: 54px; height: 54px; background: #1f4e79; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
   h1 { font-size: 1.6rem; color: #90caf9; }
   h1 small { font-size: 0.85rem; color: #78909c; font-weight: normal; }
 
-  /* ── Cards ── */
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 14px; margin-bottom: 24px;
-  }
-  .card {
-    background: #162032; border: 1px solid #1f4e79;
-    border-radius: 12px; padding: 18px; text-align: center;
-  }
+  /* Cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card { background: #162032; border: 1px solid #1f4e79; border-radius: 12px; padding: 18px; text-align: center; }
   .card .num { font-size: 2.2rem; font-weight: bold; color: #42a5f5; }
   .card .lbl { font-size: 0.82rem; color: #78909c; margin-top: 4px; }
-  .card.green  .num { color: #66bb6a; }
-  .card.red    .num { color: #ef5350; }
-  .card.yellow .num { color: #ffa726; }
+  .card.green .num { color: #66bb6a; } .card.red .num { color: #ef5350; } .card.yellow .num { color: #ffa726; }
 
-  /* ── Status bar ── */
-  .status-bar {
-    background: #162032; border: 1px solid #1a3a5c;
-    border-radius: 8px; padding: 10px 18px;
-    margin-bottom: 24px;
-    display: flex; gap: 24px; font-size: 0.83rem; color: #78909c; flex-wrap: wrap;
-  }
+  /* Status bar */
+  .status-bar { background: #162032; border: 1px solid #1a3a5c; border-radius: 8px; padding: 10px 18px; margin-bottom: 20px; display: flex; gap: 24px; font-size: 0.83rem; color: #78909c; flex-wrap: wrap; }
   .status-bar span { display: flex; align-items: center; gap: 6px; }
-  .dot {
-    width: 8px; height: 8px; border-radius: 50%; background: #66bb6a;
-    animation: pulse 2s infinite;
-  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #66bb6a; animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-  /* ── Filter Panel ── */
-  .filter-panel {
-    background: #162032; border: 1px solid #1f4e79;
-    border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
-  }
+  /* Filter panel */
+  .filter-panel { background: #162032; border: 1px solid #1f4e79; border-radius: 12px; margin-bottom: 14px; overflow: hidden; }
   .filter-title {
-    font-size: 1rem; color: #90caf9; font-weight: bold;
-    margin-bottom: 16px; padding-bottom: 10px;
-    border-bottom: 1px solid #1a3a5c;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; cursor: pointer; user-select: none;
+    font-size: .95rem; font-weight: bold; color: #90caf9;
+    transition: background .15s;
   }
-  .filter-row {
-    display: flex; gap: 14px; flex-wrap: wrap;
-    margin-bottom: 16px; align-items: flex-end;
+  .filter-title:hover { background: rgba(255,255,255,.03); }
+  .filter-title-right { display: flex; align-items: center; gap: 10px; }
+  .filter-active-tag { font-size: .73rem; color: #42a5f5; font-style: italic; font-weight: normal; }
+  .filter-toggle { font-size: .8rem; color: #546e7a; transition: transform .2s; }
+  .filter-toggle.open { transform: rotate(0deg); }
+  .filter-toggle.closed { transform: rotate(-90deg); }
+
+  .filter-body { padding: 0 20px 18px; border-top: 1px solid #1a3a5c; }
+
+  /* Date presets */
+  .date-presets { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 14px; padding-top: 16px; }
+  .preset-btn {
+    padding: 5px 13px; background: #0d1b2a; border: 1px solid #1a3a5c;
+    border-radius: 20px; color: #90caf9; cursor: pointer;
+    font-size: .8rem; font-family: Arial, sans-serif; transition: all .15s;
   }
+  .preset-btn:hover { border-color: #42a5f5; color: #42a5f5; background: rgba(66,165,245,.08); }
+  .preset-btn.active-preset { border-color: #42a5f5; background: rgba(66,165,245,.15); color: #e8eaf6; }
+
+  /* Filter rows */
+  .filter-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-end; }
   .filter-group { display: flex; flex-direction: column; gap: 5px; }
-  .filter-group label { font-size: 0.78rem; color: #78909c; }
+  .filter-group label { font-size: .78rem; color: #78909c; }
   .filter-group input[type="date"],
   .filter-group input[type="text"] {
-    background: #0d1b2a; border: 1px solid #1a3a5c;
-    border-radius: 6px; color: #e8eaf6;
-    padding: 8px 11px; font-size: 0.88rem; font-family: Arial, sans-serif;
+    background: #0d1b2a; border: 1px solid #1a3a5c; border-radius: 6px;
+    color: #e8eaf6; padding: 8px 11px; font-size: .88rem; font-family: Arial, sans-serif;
   }
-  .filter-group input[type="date"] { min-width: 150px; }
-  .filter-group input[type="text"] { min-width: 200px; }
+  .filter-group input[type="date"] { min-width: 148px; }
+  .filter-group input[type="text"] { min-width: 210px; }
   .filter-group input:focus { outline: none; border-color: #42a5f5; }
   .filter-group input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.8); }
 
+  /* Type chips */
   .type-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
-  .type-chip {
-    padding: 4px 12px; border-radius: 20px; font-size: 0.8rem;
-    cursor: pointer; border: 2px solid transparent;
-    transition: opacity .15s, border-color .15s;
-    user-select: none; opacity: .32;
-  }
-  .type-chip.active { opacity: 1; border-color: rgba(255,255,255,.28); }
+  .type-chip { padding: 5px 13px; border-radius: 20px; font-size: .8rem; cursor: pointer; border: 2px solid transparent; transition: opacity .15s, border-color .15s; user-select: none; opacity: .3; }
+  .type-chip.active { opacity: 1; border-color: rgba(255,255,255,.25); }
 
-  .filter-actions {
-    display: flex; gap: 10px; margin-top: 16px;
-    align-items: center; flex-wrap: wrap;
-  }
-  .btn-apply {
-    padding: 8px 20px; background: #1565c0; color: #fff;
-    border: none; border-radius: 8px; cursor: pointer;
-    font-size: 0.88rem; font-weight: bold; font-family: Arial, sans-serif;
-  }
-  .btn-apply:hover { background: #1976d2; }
-  .btn-clear {
-    padding: 8px 14px; background: transparent; color: #78909c;
-    border: 1px solid #455a64; border-radius: 8px;
-    cursor: pointer; font-size: 0.84rem; font-family: Arial, sans-serif;
-  }
+  /* Filter actions */
+  .filter-actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+  .btn-clear { padding: 7px 14px; background: transparent; color: #546e7a; border: 1px solid #37474f; border-radius: 8px; cursor: pointer; font-size: .83rem; font-family: Arial, sans-serif; }
   .btn-clear:hover { color: #e8eaf6; border-color: #78909c; }
-  .filter-summary { font-size: 0.8rem; color: #42a5f5; font-style: italic; }
 
-  /* ── Export button ── */
-  .export-btn {
-    display: block; width: 100%; padding: 17px;
-    font-size: 1.25rem; font-weight: bold;
-    background: linear-gradient(135deg, #1565c0, #0d47a1);
-    color: #fff; border: none; border-radius: 12px;
-    cursor: pointer; letter-spacing: .5px; transition: all .2s;
-    margin-bottom: 20px; text-decoration: none; text-align: center;
-  }
-  .export-btn:hover {
-    background: linear-gradient(135deg, #1976d2, #1565c0);
-    transform: translateY(-2px); box-shadow: 0 6px 20px rgba(21,101,192,.5);
-  }
+  /* Result bar */
+  .result-bar { font-size: .82rem; color: #546e7a; margin-bottom: 14px; min-height: 20px; }
+  .result-bar.filtered { color: #42a5f5; }
+  .result-bar.empty { color: #ef9a9a; }
+
+  /* Export button */
+  .export-btn { display: block; width: 100%; padding: 17px; font-size: 1.25rem; font-weight: bold; background: linear-gradient(135deg, #1565c0, #0d47a1); color: #fff; border: none; border-radius: 12px; cursor: pointer; letter-spacing: .5px; transition: all .2s; margin-bottom: 20px; text-decoration: none; text-align: center; }
+  .export-btn:hover { background: linear-gradient(135deg, #1976d2, #1565c0); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(21,101,192,.5); }
   .export-btn:active { transform: translateY(0); }
 
-  /* ── Table ── */
+  /* Table */
   table { width: 100%; border-collapse: collapse; font-size: .87rem; margin-top: 18px; }
-  thead th {
-    background: #1f4e79; color: #fff;
-    padding: 10px 14px; text-align: right; font-weight: bold;
-  }
-  tbody tr:nth-child(even) { background: #162032; }
-  tbody tr:hover           { background: #1a3a5c; }
+  thead th { background: #1f4e79; color: #fff; padding: 10px 14px; text-align: right; font-weight: bold; }
+  tbody tr:nth-child(even) { background: #162032; } tbody tr:hover { background: #1a3a5c; }
   tbody td { padding: 8px 14px; border-bottom: 1px solid #1a3a5c; }
-
-  .badge {
-    display: inline-block; padding: 2px 8px;
-    border-radius: 20px; font-size: .77rem; font-weight: bold; color: #fff;
-  }
-  .section-title {
-    font-size: 1.05rem; color: #90caf9; margin-bottom: 10px;
-    padding-bottom: 6px; border-bottom: 1px solid #1f4e79;
-  }
+  .empty-row td { text-align: center; color: #546e7a; padding: 24px; font-size: .88rem; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .77rem; font-weight: bold; color: #fff; }
+  .section-title { font-size: 1.05rem; color: #90caf9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
   #refresh-notice { font-size: .77rem; color: #546e7a; text-align: center; margin-top: 22px; }
 </style>
 </head>
@@ -662,23 +612,13 @@ HTML = """<!DOCTYPE html>
   </div>
 </header>
 
-<!-- Cards -->
 <div class="cards">
-  <div class="card red">
-    <div class="num" id="total">—</div><div class="lbl">סה"כ התראות</div>
-  </div>
-  <div class="card">
-    <div class="num" id="cities">—</div><div class="lbl">ישובים מושפעים</div>
-  </div>
-  <div class="card yellow">
-    <div class="num" id="new_today">—</div><div class="lbl">חדשות מסשן זה</div>
-  </div>
-  <div class="card green">
-    <div class="num" id="newest">—</div><div class="lbl">התראה אחרונה</div>
-  </div>
+  <div class="card red">  <div class="num" id="total">—</div>  <div class="lbl">סה"כ התראות</div></div>
+  <div class="card">      <div class="num" id="cities">—</div> <div class="lbl">ישובים מושפעים</div></div>
+  <div class="card yellow"><div class="num" id="new_today">—</div><div class="lbl">חדשות מסשן זה</div></div>
+  <div class="card green"> <div class="num" id="newest">—</div> <div class="lbl">התראה אחרונה</div></div>
 </div>
 
-<!-- Status bar -->
 <div class="status-bar">
   <span><span class="dot"></span> אוסף נתונים חיים</span>
   <span>עדכון (live): <b id="last_live">—</b></span>
@@ -686,42 +626,61 @@ HTML = """<!DOCTYPE html>
   <span>שגיאות: <b id="errors">0</b></span>
 </div>
 
-<!-- ── Filter Panel ──────────────────────────────────── -->
-<div class="filter-panel">
-  <div class="filter-title">🔍 סינון נתונים</div>
+<!-- ── Filter Panel ── -->
+<div class="filter-panel" id="filter-panel">
 
-  <div class="filter-row">
+  <div class="filter-title" onclick="toggleFilterPanel()">
+    <span>🔍 סינון נתונים <span class="filter-active-tag" id="filter-active-tag"></span></span>
+    <div class="filter-title-right">
+      <span id="filter-toggle" class="filter-toggle open">▼</span>
+    </div>
+  </div>
+
+  <div class="filter-body" id="filter-body">
+
+    <!-- קיצורי תאריך -->
+    <div class="date-presets">
+      <button class="preset-btn" id="preset-today"     onclick="setPreset('today')">היום</button>
+      <button class="preset-btn" id="preset-yesterday" onclick="setPreset('yesterday')">אתמול</button>
+      <button class="preset-btn" id="preset-3days"     onclick="setPreset('3days')">3 ימים אחרונים</button>
+      <button class="preset-btn" id="preset-week"      onclick="setPreset('week')">שבוע אחרון</button>
+      <button class="preset-btn" id="preset-all"       onclick="setPreset('all')">הכל</button>
+    </div>
+
+    <div class="filter-row">
+      <div class="filter-group">
+        <label>מתאריך</label>
+        <input type="date" id="f-from">
+      </div>
+      <div class="filter-group">
+        <label>עד תאריך</label>
+        <input type="date" id="f-to">
+      </div>
+      <div class="filter-group" style="flex:1;min-width:210px">
+        <label>יישוב</label>
+        <input type="text" id="f-city" list="city-list" placeholder="חפש שם יישוב...">
+        <datalist id="city-list"></datalist>
+      </div>
+    </div>
+
     <div class="filter-group">
-      <label>מתאריך</label>
-      <input type="date" id="f-from">
+      <label>סוגי התראות <span style="color:#37474f;font-size:.72rem">(לחץ לבחירה / ביטול בחירה)</span></label>
+      <div class="type-chips" id="type-chips">טוען...</div>
     </div>
-    <div class="filter-group">
-      <label>עד תאריך</label>
-      <input type="date" id="f-to">
-    </div>
-    <div class="filter-group" style="flex:1;min-width:200px">
-      <label>יישוב</label>
-      <input type="text" id="f-city" list="city-list" placeholder="חפש שם יישוב...">
-      <datalist id="city-list"></datalist>
-    </div>
-  </div>
 
-  <div class="filter-group">
-    <label>סוגי התראות <span style="color:#546e7a;font-size:.73rem">(לחץ לבחירה/ביטול)</span></label>
-    <div class="type-chips" id="type-chips">טוען...</div>
-  </div>
+    <div class="filter-actions">
+      <button class="btn-clear" onclick="clearFilters()">✕ נקה הכל</button>
+    </div>
 
-  <div class="filter-actions">
-    <button class="btn-apply" onclick="applyFilters()">🔄 עדכן תצוגה</button>
-    <button class="btn-clear" onclick="clearFilters()">✕ נקה הכל</button>
-    <span class="filter-summary" id="filter-summary"></span>
-  </div>
-</div>
-<!-- ──────────────────────────────────────────────────── -->
+  </div><!-- /filter-body -->
+</div><!-- /filter-panel -->
+
+<!-- Result bar -->
+<div class="result-bar" id="result-bar"></div>
 
 <a id="export-btn" href="/export" class="export-btn">⬇️ &nbsp; ייצא קובץ Excel (לפי פילטר)</a>
 
-<div class="section-title">10 התראות אחרונות (לפי פילטר)</div>
+<div class="section-title">10 התראות אחרונות</div>
 <table>
   <thead><tr><th>זמן</th><th>ישוב</th><th>סוג</th></tr></thead>
   <tbody id="recent"></tbody>
@@ -730,25 +689,64 @@ HTML = """<!DOCTYPE html>
 <div id="refresh-notice">מתרענן אוטומטית · <span id="countdown">15</span>ש</div>
 
 <script>
-const TYPE_COLORS = {
-  1:"FF4444",2:"FF8800",3:"AA44FF",4:"4488FF",
-  5:"FF44AA",6:"FF6600",13:"44BB44",14:"FFCC00",15:"FF8844",101:"FF4444"
-};
+const TYPE_COLORS = {1:"FF4444",2:"FF8800",3:"AA44FF",4:"4488FF",5:"FF44AA",6:"FF6600",13:"44BB44",14:"FFCC00",15:"FF8844",101:"FF4444"};
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
-function colorFor(title) {
-  if (title.includes("רקטות")||title.includes("טילים")) return "#ef5350";
-  if (title.includes("ביטול")||title.includes("שגרה")) return "#66bb6a";
-  if (title.includes("הנחיות")||title.includes("להישאר")) return "#ffa726";
-  if (title.includes("כלי טיס")) return "#ff7043";
+function colorFor(t) {
+  if (t.includes("רקטות")||t.includes("טילים")) return "#ef5350";
+  if (t.includes("ביטול")||t.includes("שגרה")||t.includes("לצאת")) return "#66bb6a";
+  if (t.includes("הנחיות")||t.includes("להישאר")||t.includes("סמיכות")) return "#ffa726";
+  if (t.includes("כלי טיס")) return "#ff7043";
+  if (t.includes("בדקות")) return "#78909c";
   return "#78909c";
 }
 
 /* ── Filter state ── */
 let allTypes = [];
-let selectedTypes = null;   // null = כולם נבחרו
+let selectedTypes = null;    // null = all
+let debounceTimer = null;
+let filterPanelOpen = true;
 
+/* ── Date presets ── */
+const fmt = d => d.toISOString().slice(0,10);
+const shiftDay = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
+
+function setPreset(p) {
+  const today = new Date();
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active-preset"));
+  document.getElementById("preset-" + p)?.classList.add("active-preset");
+  const from = document.getElementById("f-from");
+  const to   = document.getElementById("f-to");
+  if      (p === "today")     { from.value = fmt(today);            to.value = fmt(today); }
+  else if (p === "yesterday") { const y = shiftDay(today,-1); from.value = fmt(y); to.value = fmt(y); }
+  else if (p === "3days")     { from.value = fmt(shiftDay(today,-2)); to.value = fmt(today); }
+  else if (p === "week")      { from.value = fmt(shiftDay(today,-6)); to.value = fmt(today); }
+  else                        { from.value = ""; to.value = ""; }
+  applyFilters();
+}
+
+function detectPreset() {
+  const from = document.getElementById("f-from").value;
+  const to   = document.getElementById("f-to").value;
+  const today = fmt(new Date());
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active-preset"));
+  if (!from && !to) document.getElementById("preset-all").classList.add("active-preset");
+  else if (from === today && to === today) document.getElementById("preset-today").classList.add("active-preset");
+  else if (from === fmt(shiftDay(new Date(),-1)) && to === from) document.getElementById("preset-yesterday").classList.add("active-preset");
+  else if (from === fmt(shiftDay(new Date(),-6)) && to === today) document.getElementById("preset-week").classList.add("active-preset");
+}
+
+/* ── Collapsible panel ── */
+function toggleFilterPanel() {
+  filterPanelOpen = !filterPanelOpen;
+  document.getElementById("filter-body").style.display = filterPanelOpen ? "" : "none";
+  const tog = document.getElementById("filter-toggle");
+  tog.classList.toggle("open",   filterPanelOpen);
+  tog.classList.toggle("closed", !filterPanelOpen);
+}
+
+/* ── Build params ── */
 function buildFilterParams() {
   const p = new URLSearchParams();
   const from = document.getElementById("f-from").value;
@@ -766,7 +764,8 @@ function applyFilters() {
   const p  = buildFilterParams();
   const qs = p.toString() ? "?" + p.toString() : "";
   document.getElementById("export-btn").href = "/export" + qs;
-  updateSummary(p);
+  updateActiveTag(p);
+  detectPreset();
   refresh(p);
 }
 
@@ -779,19 +778,21 @@ function clearFilters() {
   applyFilters();
 }
 
-function updateSummary(p) {
+function updateActiveTag(p) {
   const parts = [];
-  if (p.get("date_from")) parts.push("מ-" + p.get("date_from"));
-  if (p.get("date_to"))   parts.push("עד " + p.get("date_to"));
-  if (p.get("city"))      parts.push("יישוב: " + esc(p.get("city")));
-  if (p.get("types"))     parts.push(p.get("types").split(",").length + " סוגי התראות");
-  document.getElementById("filter-summary").textContent =
-    parts.length ? "פילטר פעיל: " + parts.join(" · ") : "";
+  if (p.get("date_from") || p.get("date_to")) {
+    const f = p.get("date_from") || ""; const t = p.get("date_to") || "";
+    parts.push(f && t ? f.slice(5)+" — "+t.slice(5) : f||t);
+  }
+  if (p.get("city"))  parts.push(esc(p.get("city")));
+  if (p.get("types")) parts.push(p.get("types").split(",").length + " סוגים");
+  const tag = document.getElementById("filter-active-tag");
+  tag.textContent = parts.length ? "· " + parts.join(" · ") : "";
 }
 
+/* ── Type chips ── */
 function toggleType(el, title) {
   if (selectedTypes === null) {
-    // מצב "הכל" → עובר למצב בחירה, שומר הכל פרט ללחוץ
     selectedTypes = new Set(allTypes.map(t => t.title));
     selectedTypes.delete(title);
     document.querySelectorAll(".type-chip").forEach(c =>
@@ -799,22 +800,22 @@ function toggleType(el, title) {
   } else if (selectedTypes.has(title)) {
     selectedTypes.delete(title);
     el.classList.remove("active");
-    if (selectedTypes.size === 0) {          // אפס נבחרו → חזור להכל
+    if (selectedTypes.size === 0) {
       selectedTypes = null;
       document.querySelectorAll(".type-chip").forEach(c => c.classList.add("active"));
     }
   } else {
     selectedTypes.add(title);
     el.classList.add("active");
-    if (selectedTypes.size === allTypes.length) selectedTypes = null; // הכל נבחר שוב
+    if (selectedTypes.size === allTypes.length) selectedTypes = null;
   }
+  applyFilters();   // ← auto-apply on chip click
 }
 
 /* ── Load metadata ── */
 async function loadCities() {
   const cities = await fetch("/api/cities").then(r => r.json());
-  document.getElementById("city-list").innerHTML =
-    cities.map(c => `<option value="${esc(c)}">`).join("");
+  document.getElementById("city-list").innerHTML = cities.map(c => `<option value="${esc(c)}">`).join("");
 }
 
 async function loadTypes() {
@@ -823,10 +824,11 @@ async function loadTypes() {
   if (!allTypes.length) { el.textContent = "אין נתונים עדיין"; return; }
   el.innerHTML = allTypes.map(t => {
     const hex = TYPE_COLORS[t.category] || "AAAAAA";
+    const cnt = t.total ? ` <span style="opacity:.5;font-size:.7rem">(${t.total.toLocaleString()})</span>` : "";
     return `<span class="type-chip active"
-      style="background:#${hex}2a;color:#${hex};border-color:#${hex}55"
+      style="background:#${hex}28;color:#${hex};border-color:#${hex}50"
       data-title="${esc(t.title)}"
-      onclick="toggleType(this,'${esc(t.title)}')">${esc(t.title)}</span>`;
+      onclick="toggleType(this,'${esc(t.title)}')">${esc(t.title)}${cnt}</span>`;
   }).join("");
 }
 
@@ -848,17 +850,45 @@ async function refresh(filterParams) {
   document.getElementById("last_history").textContent = state.last_history;
   document.getElementById("errors").textContent       = state.live_errors;
 
+  // Result bar
+  const rb = document.getElementById("result-bar");
+  const isFiltered = qs.length > 0;
+  if (stats.total === 0 && isFiltered) {
+    rb.className = "result-bar empty";
+    rb.textContent = "⚠️ אין תוצאות לפילטר הנוכחי";
+  } else if (isFiltered) {
+    rb.className = "result-bar filtered";
+    rb.textContent = `📊 מציג ${stats.total.toLocaleString()} התראות (מסונן)`;
+  } else {
+    rb.className = "result-bar";
+    rb.textContent = `📊 סה"כ ${stats.total.toLocaleString()} התראות`;
+  }
+
+  // Recent table
   const tbody = document.getElementById("recent");
-  tbody.innerHTML = "";
-  recent.forEach(r => {
-    const color = colorFor(r.title);
-    tbody.innerHTML += `<tr>
-      <td>${r.alert_dt.slice(5,16)}</td>
-      <td>${esc(r.city)}</td>
-      <td><span class="badge" style="background:${color}">${esc(r.title)}</span></td>
-    </tr>`;
-  });
+  if (!recent.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="3">אין תוצאות לפילטר הנוכחי</td></tr>`;
+  } else {
+    tbody.innerHTML = "";
+    recent.forEach(r => {
+      const color = colorFor(r.title);
+      tbody.innerHTML += `<tr>
+        <td>${r.alert_dt.slice(5,16)}</td>
+        <td>${esc(r.city)}</td>
+        <td><span class="badge" style="background:${color}">${esc(r.title)}</span></td>
+      </tr>`;
+    });
+  }
 }
+
+/* ── Auto-apply with debounce on date/city changes ── */
+function debouncedApply() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(applyFilters, 600);
+}
+document.getElementById("f-from").addEventListener("change", debouncedApply);
+document.getElementById("f-to").addEventListener("change",   debouncedApply);
+document.getElementById("f-city").addEventListener("input",  debouncedApply);
 
 /* ── Init ── */
 let cd = 15;
@@ -868,7 +898,9 @@ setInterval(() => {
 }, 1000);
 
 loadCities();
-loadTypes().then(() => refresh());
+loadTypes().then(() => {
+  setPreset("all");   // מסמן "הכל" כברירת מחדל
+});
 </script>
 </body>
 </html>
@@ -911,9 +943,13 @@ def api_cities():
 def api_types():
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT title, category FROM alerts ORDER BY title"
+            "SELECT title, MIN(category) as category, COUNT(*) as total "
+            "FROM alerts GROUP BY title ORDER BY total DESC"
         ).fetchall()
-    return jsonify([{"title": r["title"], "category": r["category"]} for r in rows])
+    return jsonify([
+        {"title": r["title"], "category": r["category"], "total": r["total"]}
+        for r in rows
+    ])
 
 @app.route("/export")
 def export():
