@@ -28,8 +28,12 @@ DB_PATH           = "alerts.db"
 LIVE_INTERVAL     = 10    # seconds — Alerts.json (פעיל עכשיו)
 HISTORY_INTERVAL  = 120   # seconds — GetAlarmsHistory (כל 2 דקות, בהתאם ל-cache)
 PORT              = 5050
+IS_CLOUD          = False  # מוגדר ב-main() לפי env vars
 
 OREF_HEADERS = {
+    "User-Agent":       ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/122.0.0.0 Safari/537.36"),
     "Referer":          "https://www.oref.org.il/",
     "X-Requested-With": "XMLHttpRequest",
     "Accept":           "application/json",
@@ -774,14 +778,14 @@ def startup_backfill():
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     import os
+    global DB_PATH, IS_CLOUD
 
     # בענן: PORT מגיע מ-environment variable; מקומית: 5050
     port     = int(os.environ.get("PORT", PORT))
-    is_cloud = os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")
+    IS_CLOUD = bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT"))
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     db_dir     = os.environ.get("DB_DIR", script_dir)   # בענן אפשר לדרוס נתיב
-    global DB_PATH
     DB_PATH = os.path.join(db_dir, "alerts.db")
 
     os.makedirs(db_dir, exist_ok=True)
@@ -790,15 +794,21 @@ def main():
     # טעינה ראשונית
     threading.Thread(target=startup_backfill, name="backfill", daemon=True).start()
 
-    # Collectors רקע
-    for target, name in [(collect_live, "live"), (collect_history, "history")]:
-        t = threading.Thread(target=target, name=name, daemon=True)
-        t.start()
+    # Collector היסטוריה — פועל תמיד (בענן ומקומית)
+    threading.Thread(target=collect_history, name="history", daemon=True).start()
 
-    log.info("Server starting on port %d (cloud=%s)", port, bool(is_cloud))
+    # Collector Live (Alerts.json) — רק מקומית; בענן oref.org.il חוסם IP של שרתי ענן
+    if not IS_CLOUD:
+        threading.Thread(target=collect_live, name="live", daemon=True).start()
+        log.info("Live collector enabled (local mode)")
+    else:
+        log.info("Live collector disabled (cloud mode — GetAlarmsHistory covers recent data)")
+        _state["last_live"] = "N/A (ענן)"
+
+    log.info("Server starting on port %d (cloud=%s)", port, IS_CLOUD)
 
     # פתיחת דפדפן רק במצב מקומי
-    if not is_cloud:
+    if not IS_CLOUD:
         import webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()
 
