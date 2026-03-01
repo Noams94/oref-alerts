@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: oref-alerts
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python oref_app.py
+    plan: free
+    envVars:
+      - key: RENDER
+        value: "true"
+      - key: DB_DIR
+        value: /opt/render/project/src
+    disk:
+      name: alerts-db
+      mountPath: /opt/render/project/src
+      sizeGB: 1
