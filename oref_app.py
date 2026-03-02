@@ -679,6 +679,7 @@ HTML = """<!DOCTYPE html>
 
     <div class="filter-actions">
       <button class="btn-clear" onclick="clearFilters()">✕ נקה הכל</button>
+      <button class="btn-clear" onclick="selectAllTypes()" style="color:#42a5f5;border-color:#1a3a5c;">✓ בחר הכל</button>
     </div>
 
   </div><!-- /filter-body -->
@@ -785,6 +786,12 @@ function clearFilters() {
   document.getElementById("f-city").value = "";
   const sel = document.getElementById("type-select");
   if (sel) [...sel.options].forEach(o => o.selected = false);
+  applyFilters();
+}
+
+function selectAllTypes() {
+  const sel = document.getElementById("type-select");
+  if (sel) [...sel.options].forEach(o => o.selected = true);
   applyFilters();
 }
 
