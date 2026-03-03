@@ -226,6 +226,14 @@ def _parse_filters(args):
             clauses.append(f"title IN ({placeholders})")
             params.extend(types)
 
+    origins_raw = args.get("origins", "").strip()
+    if origins_raw:
+        origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
+        if origins:
+            placeholders = ",".join("?" * len(origins))
+            clauses.append(f"origin IN ({placeholders})")
+            params.extend(origins)
+
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, tuple(params)
 
@@ -676,17 +684,33 @@ HTML = """<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="filter-group" style="width:100%">
-      <label>סוגי התראות</label>
-      <select multiple id="type-select" size="6">
-        <option value="" disabled>טוען...</option>
-      </select>
-      <div class="type-select-hint">Ctrl+לחיצה לבחירה מרובה &nbsp;·&nbsp; ללא בחירה = כל הסוגים</div>
+    <div class="filter-row" style="align-items:flex-start">
+      <div class="filter-group" style="flex:1;min-width:260px">
+        <label>סוגי התראות</label>
+        <select multiple id="type-select" size="6">
+          <option value="" disabled>טוען...</option>
+        </select>
+        <div class="type-select-hint">Ctrl+לחיצה לבחירה מרובה &nbsp;·&nbsp; ללא בחירה = כל הסוגים</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn-clear" onclick="selectAllTypes()" style="color:#42a5f5;border-color:#1a3a5c;font-size:.75rem;padding:4px 10px;">✓ הכל</button>
+          <button class="btn-clear" onclick="clearTypes()" style="font-size:.75rem;padding:4px 10px;">✕ נקה</button>
+        </div>
+      </div>
+      <div class="filter-group" style="min-width:160px">
+        <label>מקור</label>
+        <select multiple id="origin-select" size="6">
+          <option value="" disabled>טוען...</option>
+        </select>
+        <div class="type-select-hint">ללא בחירה = כל המקורות</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn-clear" onclick="selectAllOrigins()" style="color:#42a5f5;border-color:#1a3a5c;font-size:.75rem;padding:4px 10px;">✓ הכל</button>
+          <button class="btn-clear" onclick="clearOrigins()" style="font-size:.75rem;padding:4px 10px;">✕ נקה</button>
+        </div>
+      </div>
     </div>
 
     <div class="filter-actions">
       <button class="btn-clear" onclick="clearFilters()">✕ נקה הכל</button>
-      <button class="btn-clear" onclick="selectAllTypes()" style="color:#42a5f5;border-color:#1a3a5c;">✓ בחר הכל</button>
     </div>
 
   </div><!-- /filter-body -->
@@ -728,8 +752,20 @@ function colorFor(t) {
 }
 
 /* ── Filter state ── */
-let allTypes = [];
+let allTypes   = [];
+let allOrigins = [];
 let debounceTimer = null;
+
+const ORIGIN_HE = {
+  "Iran":    "איראן",
+  "Gaza":    "עזה",
+  "Lebanon": "לבנון",
+  "Yemen":   "תימן",
+  "Iraq":    "עיראק",
+  "Syria":   "סוריה",
+  "Israel":  "ישראל",
+  "FA":      "אזעקת שווא",
+};
 let filterPanelOpen = true;
 
 /* ── Date presets ── */
@@ -776,13 +812,20 @@ function buildFilterParams() {
   const from = document.getElementById("f-from").value;
   const to   = document.getElementById("f-to").value;
   const city = document.getElementById("f-city").value.trim();
-  const sel  = document.getElementById("type-select");
-  const chosen = sel ? [...sel.selectedOptions].map(o => o.value).filter(Boolean) : [];
+
+  const tSel   = document.getElementById("type-select");
+  const chosen = tSel ? [...tSel.selectedOptions].map(o => o.value).filter(Boolean) : [];
+
+  const oSel    = document.getElementById("origin-select");
+  const origins = oSel ? [...oSel.selectedOptions].map(o => o.value).filter(Boolean) : [];
+
   if (from) p.set("date_from", from);
   if (to)   p.set("date_to",   to);
   if (city) p.set("city",      city);
   if (chosen.length > 0 && chosen.length < allTypes.length)
     p.set("types", chosen.join(","));
+  if (origins.length > 0 && origins.length < allOrigins.length)
+    p.set("origins", origins.join(","));
   return p;
 }
 
@@ -799,14 +842,31 @@ function clearFilters() {
   document.getElementById("f-from").value = "";
   document.getElementById("f-to").value   = "";
   document.getElementById("f-city").value = "";
-  const sel = document.getElementById("type-select");
-  if (sel) [...sel.options].forEach(o => o.selected = false);
+  const tSel = document.getElementById("type-select");
+  if (tSel) [...tSel.options].forEach(o => o.selected = false);
+  const oSel = document.getElementById("origin-select");
+  if (oSel) [...oSel.options].forEach(o => o.selected = false);
   applyFilters();
 }
 
 function selectAllTypes() {
   const sel = document.getElementById("type-select");
   if (sel) [...sel.options].forEach(o => o.selected = true);
+  applyFilters();
+}
+function clearTypes() {
+  const sel = document.getElementById("type-select");
+  if (sel) [...sel.options].forEach(o => o.selected = false);
+  applyFilters();
+}
+function selectAllOrigins() {
+  const sel = document.getElementById("origin-select");
+  if (sel) [...sel.options].forEach(o => o.selected = true);
+  applyFilters();
+}
+function clearOrigins() {
+  const sel = document.getElementById("origin-select");
+  if (sel) [...sel.options].forEach(o => o.selected = false);
   applyFilters();
 }
 
@@ -817,7 +877,8 @@ function updateActiveTag(p) {
     parts.push(f && t ? f.slice(5)+" — "+t.slice(5) : f||t);
   }
   if (p.get("city"))  parts.push(esc(p.get("city")));
-  if (p.get("types")) parts.push(p.get("types").split(",").length + " סוגים");
+  if (p.get("types"))   parts.push(p.get("types").split(",").length + " סוגים");
+  if (p.get("origins")) parts.push(p.get("origins").split(",").join(" / "));
   const tag = document.getElementById("filter-active-tag");
   tag.textContent = parts.length ? "· " + parts.join(" · ") : "";
 }
@@ -838,6 +899,20 @@ async function loadTypes() {
   sel.innerHTML = allTypes.map(t => {
     const cnt = t.total ? ` (${t.total.toLocaleString()})` : "";
     return `<option value="${esc(t.title)}">${esc(t.title)}${cnt}</option>`;
+  }).join("");
+}
+
+async function loadOrigins() {
+  allOrigins = await fetch("/api/origins").then(r => r.json());
+  const sel = document.getElementById("origin-select");
+  if (!allOrigins.length) {
+    sel.innerHTML = '<option value="" disabled>אין נתונים</option>';
+    return;
+  }
+  sel.innerHTML = allOrigins.map(o => {
+    const label = ORIGIN_HE[o.origin] || o.origin;
+    const cnt   = o.total ? ` (${o.total.toLocaleString()})` : "";
+    return `<option value="${esc(o.origin)}">${esc(label)}${cnt}</option>`;
   }).join("");
 }
 
@@ -899,6 +974,7 @@ document.getElementById("f-from").addEventListener("change", debouncedApply);
 document.getElementById("f-to").addEventListener("change",   debouncedApply);
 document.getElementById("f-city").addEventListener("input",  debouncedApply);
 document.getElementById("type-select").addEventListener("change", applyFilters);
+document.getElementById("origin-select").addEventListener("change", applyFilters);
 
 /* ── Init ── */
 let cd = 15;
@@ -908,6 +984,7 @@ setInterval(() => {
 }, 1000);
 
 loadCities();
+loadOrigins();
 loadTypes().then(() => {
   setPreset("all");   // מסמן "הכל" כברירת מחדל
 });
@@ -961,6 +1038,17 @@ def api_types():
         for r in rows
     ])
 
+@app.route("/api/origins")
+def api_origins():
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT origin, COUNT(*) as total FROM alerts "
+            "WHERE origin != '' GROUP BY origin ORDER BY total DESC"
+        ).fetchall()
+    return jsonify([
+        {"origin": r["origin"], "total": r["total"]} for r in rows
+    ])
+
 @app.route("/export")
 def export():
     args  = request.args
@@ -974,6 +1062,9 @@ def export():
     if args.get("types"):
         types_list = [t.strip() for t in args["types"].split(",") if t.strip()]
         parts.append(f"סוגי התראות: {', '.join(types_list)}")
+    if args.get("origins"):
+        origins_list = [o.strip() for o in args["origins"].split(",") if o.strip()]
+        parts.append(f"מקור: {', '.join(origins_list)}")
     filter_info = " | ".join(parts) if parts else None
 
     s     = get_stats(where, params)
