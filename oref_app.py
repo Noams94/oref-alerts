@@ -124,6 +124,16 @@ def init_db():
             conn.execute("ALTER TABLE alerts ADD COLUMN origin TEXT DEFAULT ''")
             log.info("מגרציה: עמודת origin נוספה")
 
+        # טבלת קואורדינטות עיר (לג'יאוקודינג + מפה)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS city_coords (
+                city   TEXT PRIMARY KEY,
+                lat    REAL,
+                lon    REAL,
+                source TEXT DEFAULT 'nominatim'
+            )
+        """)
+
         conn.commit()
 
 def _normalize(r, source):
@@ -394,6 +404,74 @@ def collect_history():
             log.warning("History fetch error: %s", e)
         time.sleep(HISTORY_INTERVAL)
 
+
+# ─── Geocoder (Nominatim) ─────────────────────────────────────────────────────
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_UA  = "oref-alerts-dashboard/1.0"
+
+def geocode_cities_bg():
+    """רץ ברקע; ג'יאוקודינג של ערים חדשות דרך Nominatim (1 בקשה/שנייה)."""
+    log.info("Geocoder thread started")
+    # המתן קצת לסיום ה-startup_backfill לפני שמתחיל
+    time.sleep(30)
+    while True:
+        try:
+            with get_db() as conn:
+                # ערים שעדיין אין להן קואורדינטות
+                missing = conn.execute("""
+                    SELECT DISTINCT a.city FROM alerts a
+                    LEFT JOIN city_coords c ON a.city = c.city
+                    WHERE c.city IS NULL
+                    LIMIT 50
+                """).fetchall()
+
+            if not missing:
+                time.sleep(300)   # אין ערים חדשות — בדוק שוב בעוד 5 דקות
+                continue
+
+            log.info("Geocoder: %d ערים ממתינות לג'יאוקודינג", len(missing))
+            for row in missing:
+                city = row[0]
+                try:
+                    resp = requests.get(
+                        NOMINATIM_URL,
+                        params={"q": city, "countrycodes": "il",
+                                "format": "json", "limit": 1},
+                        headers={"User-Agent": NOMINATIM_UA},
+                        timeout=10,
+                    )
+                    resp.raise_for_status()
+                    results = resp.json()
+                    if results:
+                        lat = float(results[0]["lat"])
+                        lon = float(results[0]["lon"])
+                        with _db_lock:
+                            with get_db() as conn:
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO city_coords "
+                                    "(city, lat, lon) VALUES (?,?,?)",
+                                    (city, lat, lon)
+                                )
+                                conn.commit()
+                    else:
+                        # לא נמצא — שמור NULL כדי לא לנסות שוב
+                        with _db_lock:
+                            with get_db() as conn:
+                                conn.execute(
+                                    "INSERT OR IGNORE INTO city_coords "
+                                    "(city, lat, lon, source) VALUES (?,NULL,NULL,'not_found')",
+                                    (city,)
+                                )
+                                conn.commit()
+                except Exception as e:
+                    log.debug("Geocode error for '%s': %s", city, e)
+                time.sleep(1.1)   # Nominatim: max 1 req/sec
+
+        except Exception as e:
+            log.warning("Geocoder loop error: %s", e)
+            time.sleep(60)
+
+
 # ─── Excel Builder ────────────────────────────────────────────────────────────
 THIN        = Side(style="thin", color="CCCCCC")
 CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
@@ -594,6 +672,8 @@ HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>פיקוד העורף — ניטור התראות</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; background: #0d1b2a; color: #e8eaf6; min-height: 100vh; padding: 24px; }
@@ -691,6 +771,24 @@ HTML = """<!DOCTYPE html>
   .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .77rem; font-weight: bold; color: #fff; }
   .section-title { font-size: 1.05rem; color: #90caf9; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
   #refresh-notice { font-size: .77rem; color: #546e7a; text-align: center; margin-top: 22px; }
+  /* ── Map layout ── */
+  .bottom-row { display: flex; gap: 18px; align-items: flex-start; margin-top: 0; }
+  .recent-col { flex: 0 0 340px; min-width: 260px; }
+  .map-col    { flex: 1; min-width: 0; }
+  #map        { height: 430px; border-radius: 12px; border: 1px solid #1a3a5c;
+                background: #0d1b2a; }
+  .map-title  { font-size: 1.05rem; color: #90caf9; margin-bottom: 10px;
+                padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
+  .geocode-bar { font-size: .72rem; color: #546e7a; margin-top: 6px; }
+  /* override Leaflet popup for dark theme */
+  .leaflet-popup-content-wrapper { background: #0d2137; color: #e8eaf6;
+    border: 1px solid #1a3a5c; border-radius: 8px; }
+  .leaflet-popup-tip { background: #0d2137; }
+  .leaflet-popup-close-button { color: #90caf9 !important; }
+  .map-legend { background: rgba(13,27,42,.9); border: 1px solid #1a3a5c;
+    border-radius: 8px; padding: 8px 12px; font-size: .78rem; line-height: 1.8; }
+  .map-legend span { display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-left: 5px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -792,11 +890,25 @@ HTML = """<!DOCTYPE html>
 
 <a id="export-btn" href="/export" class="export-btn">⬇️ &nbsp; ייצא קובץ Excel (לפי פילטר)</a>
 
-<div class="section-title">10 התראות אחרונות</div>
-<table>
-  <thead><tr><th>זמן</th><th>ישוב</th><th>סוג</th></tr></thead>
-  <tbody id="recent"></tbody>
-</table>
+<div class="bottom-row">
+
+  <!-- ── טבלת התראות אחרונות ── -->
+  <div class="recent-col">
+    <div class="section-title">10 התראות אחרונות</div>
+    <table>
+      <thead><tr><th>זמן</th><th>ישוב</th><th>סוג</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table>
+  </div>
+
+  <!-- ── מפה ── -->
+  <div class="map-col">
+    <div class="map-title">🗺️ מפת התראות לפי יישוב</div>
+    <div id="map"></div>
+    <div class="geocode-bar" id="geocode-bar">טוען קואורדינטות...</div>
+  </div>
+
+</div>
 
 <div id="refresh-notice">מתרענן אוטומטית · <span id="countdown">15</span>ש</div>
 
@@ -996,6 +1108,7 @@ async function refresh(filterParams) {
     fetch("/api/state").then(r => r.json()),
     fetch("/api/recent" + qs).then(r => r.json()),
   ]);
+  refreshMap(fp);   // מרענן גם את המפה (async — לא חוסם)
 
   document.getElementById("total").textContent     = stats.total.toLocaleString();
   document.getElementById("cities").textContent    = stats.cities.toLocaleString();
@@ -1046,6 +1159,83 @@ document.getElementById("f-to").addEventListener("change",   debouncedApply);
 document.getElementById("f-city").addEventListener("input",  debouncedApply);
 document.getElementById("type-select").addEventListener("change", applyFilters);
 document.getElementById("origin-select").addEventListener("change", applyFilters);
+
+/* ── Map ── */
+const MAP_CAT_COLORS = {
+  1:"#ef5350", 2:"#ff7043", 3:"#ab47bc", 4:"#42a5f5",
+  5:"#ec407a", 6:"#ff7043", 7:"#ffb300", 8:"#78909c",
+  13:"#66bb6a", 14:"#ffca28", 15:"#ff8a65", 101:"#ef5350"
+};
+const MAP_CAT_LABELS = {
+  1:"ירי רקטות וטילים", 2:"חדירת כלי טיס עוין", 3:"רעידת אדמה",
+  4:"חשש לצונאמי", 5:"אירוע חומ\"ס", 6:"התרעה ביטחונית",
+  7:"גל חום", 8:"תרגיל", 13:"ביטול / שגרה",
+  14:"הנחיות פקע\"ר", 15:"חדירת כלי טיס", 101:"ירי רקטות"
+};
+
+let _map = null;
+let _mapMarkers = L.layerGroup();
+
+function initMap() {
+  if (_map) return;
+  _map = L.map("map", { center: [31.5, 34.9], zoom: 7 });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 18,
+  }).addTo(_map);
+  _mapMarkers.addTo(_map);
+
+  // Legend
+  const legend = L.control({ position: "bottomleft" });
+  legend.onAdd = () => {
+    const d = L.DomUtil.create("div", "map-legend");
+    d.innerHTML = [1,2,13,14].map(c =>
+      `<div><span style="background:#${(MAP_CAT_COLORS[c]||'#aaa').replace('#','')}"></span>${MAP_CAT_LABELS[c]||c}</div>`
+    ).join("") + '<div style="color:#546e7a;margin-top:4px">גודל = מספר התראות</div>';
+    return d;
+  };
+  legend.addTo(_map);
+}
+
+async function refreshMap(filterParams) {
+  initMap();
+  const fp = filterParams || buildFilterParams();
+  const qs = fp.toString() ? "?" + fp.toString() : "";
+
+  try {
+    const [points, geo] = await Promise.all([
+      fetch("/api/map" + qs).then(r => r.json()),
+      fetch("/api/geocode_status").then(r => r.json()),
+    ]);
+
+    // עדכן סרגל geocoding
+    const bar = document.getElementById("geocode-bar");
+    if (geo.pending > 0) {
+      bar.textContent = `ג'יאוקודינג: ${geo.geocoded.toLocaleString()} / ${geo.total.toLocaleString()} יישובים (${geo.pending} ממתינים...)`;
+    } else {
+      bar.textContent = `${geo.geocoded.toLocaleString()} יישובים על המפה`;
+    }
+
+    _mapMarkers.clearLayers();
+    points.forEach(p => {
+      const color = MAP_CAT_COLORS[p.top_cat] || "#78909c";
+      // רדיוס לוגריתמי — min 5, max 30
+      const r = Math.max(5, Math.min(30, 5 + Math.log10(p.total + 1) * 8));
+      const circle = L.circleMarker([p.lat, p.lon], {
+        radius: r, fillColor: color, color: "#fff",
+        weight: 1, opacity: 0.9, fillOpacity: 0.75,
+      });
+      circle.bindPopup(
+        `<b>${p.city}</b><br>` +
+        `סה"כ: <b>${p.total.toLocaleString()}</b> התראות<br>` +
+        `סוג עיקרי: ${MAP_CAT_LABELS[p.top_cat] || p.top_cat}`
+      );
+      _mapMarkers.addLayer(circle);
+    });
+  } catch(e) {
+    console.warn("Map refresh error:", e);
+  }
+}
 
 /* ── Init ── */
 let cd = 15;
@@ -1119,6 +1309,69 @@ def api_origins():
     return jsonify([
         {"origin": r["origin"], "total": r["total"]} for r in rows
     ])
+
+@app.route("/api/map")
+def api_map():
+    """מחזיר נקודות למפה: עיר, lat/lon, סה"כ התראות, קטגוריה שכיחה."""
+    filter_where, filter_params = _parse_filters(request.args)
+    # בנה WHERE שמשלב קואורדינטות קיימות + פילטרי המשתמש
+    extra = filter_where.replace("WHERE ", "AND ") if filter_where else ""
+    sql = f"""
+        SELECT a.city, c.lat, c.lon, a.category, COUNT(*) as n
+        FROM alerts a
+        JOIN city_coords c ON a.city = c.city
+        WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
+        {extra}
+        GROUP BY a.city, a.category
+    """
+    with get_db() as conn:
+        rows = conn.execute(sql, filter_params).fetchall()
+
+    # קיבוץ לפי עיר
+    cities = {}
+    for r in rows:
+        city = r["city"]
+        if city not in cities:
+            cities[city] = {
+                "city": city,
+                "lat":  r["lat"],
+                "lon":  r["lon"],
+                "total": 0,
+                "cats": {},
+            }
+        cities[city]["total"] += r["n"]
+        cities[city]["cats"][r["category"]] = (
+            cities[city]["cats"].get(r["category"], 0) + r["n"]
+        )
+
+    # בחר קטגוריה שכיחה לכל עיר
+    result = []
+    for d in cities.values():
+        top_cat = max(d["cats"], key=d["cats"].get)
+        result.append({
+            "city":     d["city"],
+            "lat":      d["lat"],
+            "lon":      d["lon"],
+            "total":    d["total"],
+            "top_cat":  top_cat,
+        })
+
+    return jsonify(result)
+
+@app.route("/api/geocode_status")
+def api_geocode_status():
+    """מחזיר מצב ה-geocoding — כמה ערים כבר יש להן קואורדינטות."""
+    with get_db() as conn:
+        total_cities  = conn.execute("SELECT COUNT(DISTINCT city) FROM alerts").fetchone()[0]
+        geocoded      = conn.execute(
+            "SELECT COUNT(*) FROM city_coords WHERE lat IS NOT NULL"
+        ).fetchone()[0]
+        pending       = conn.execute("""
+            SELECT COUNT(DISTINCT a.city) FROM alerts a
+            LEFT JOIN city_coords c ON a.city = c.city
+            WHERE c.city IS NULL
+        """).fetchone()[0]
+    return jsonify(total=total_cities, geocoded=geocoded, pending=pending)
 
 @app.route("/export")
 def export():
@@ -1215,6 +1468,9 @@ def main():
 
     # Collector היסטוריה — פועל תמיד (בענן ומקומית)
     threading.Thread(target=collect_history, name="history", daemon=True).start()
+
+    # Geocoder — ג'יאוקודינג ברקע לכל הערים (Nominatim, 1 req/sec)
+    threading.Thread(target=geocode_cities_bg, name="geocoder", daemon=True).start()
 
     # Collector Live (Alerts.json) — רק מקומית; בענן oref.org.il חוסם IP של שרתי ענן
     if not IS_CLOUD:
