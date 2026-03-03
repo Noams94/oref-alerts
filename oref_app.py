@@ -773,9 +773,9 @@ HTML = """<!DOCTYPE html>
   #refresh-notice { font-size: .77rem; color: #546e7a; text-align: center; margin-top: 22px; }
   /* ── Map layout ── */
   .bottom-row { display: flex; gap: 18px; align-items: flex-start; margin-top: 0; }
-  .recent-col { flex: 0 0 340px; min-width: 260px; }
+  .recent-col { flex: 1; min-width: 240px; }
   .map-col    { flex: 1; min-width: 0; }
-  #map        { height: 430px; border-radius: 12px; border: 1px solid #1a3a5c;
+  #map        { height: 320px; border-radius: 12px; border: 1px solid #1a3a5c;
                 background: #0d1b2a; }
   .map-title  { font-size: 1.05rem; color: #90caf9; margin-bottom: 10px;
                 padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
@@ -1174,16 +1174,17 @@ const MAP_CAT_LABELS = {
 };
 
 let _map = null;
-let _mapMarkers = L.layerGroup();
+let _mapMarkers = null;   // מאותחל בתוך initMap (Leaflet אולי עוד לא נטען ברמה הגלובלית)
 
 function initMap() {
   if (_map) return;
+  if (typeof L === "undefined") { console.warn("Leaflet not loaded"); return; }
   _map = L.map("map", { center: [31.5, 34.9], zoom: 7 });
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 18,
   }).addTo(_map);
-  _mapMarkers.addTo(_map);
+  _mapMarkers = L.layerGroup().addTo(_map);
 
   // Legend
   const legend = L.control({ position: "bottomleft" });
@@ -1199,6 +1200,7 @@ function initMap() {
 
 async function refreshMap(filterParams) {
   initMap();
+  if (!_map || !_mapMarkers) return;   // Leaflet לא נטען — לא קורסים
   const fp = filterParams || buildFilterParams();
   const qs = fp.toString() ? "?" + fp.toString() : "";
 
@@ -1210,10 +1212,12 @@ async function refreshMap(filterParams) {
 
     // עדכן סרגל geocoding
     const bar = document.getElementById("geocode-bar");
-    if (geo.pending > 0) {
-      bar.textContent = `ג'יאוקודינג: ${geo.geocoded.toLocaleString()} / ${geo.total.toLocaleString()} יישובים (${geo.pending} ממתינים...)`;
-    } else {
-      bar.textContent = `${geo.geocoded.toLocaleString()} יישובים על המפה`;
+    if (bar) {
+      if (geo.pending > 0) {
+        bar.textContent = `ג'יאוקודינג: ${geo.geocoded.toLocaleString()} / ${geo.total.toLocaleString()} יישובים (${geo.pending} ממתינים...)`;
+      } else {
+        bar.textContent = `${geo.geocoded.toLocaleString()} יישובים על המפה`;
+      }
     }
 
     _mapMarkers.clearLayers();
