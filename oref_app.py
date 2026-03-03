@@ -291,11 +291,12 @@ def _parse_filters(args):
     city      = args.get("city",      "").strip()
     types_raw = args.get("types",     "").strip()
 
+    # REPLACE(alert_dt,'T',' ') מנרמל גם "YYYY-MM-DDTHH:MM" (API) וגם "YYYY-MM-DD HH:MM" (CSV)
     if date_from:
-        clauses.append("alert_dt >= ?")
+        clauses.append("REPLACE(alert_dt,'T',' ') >= ?")
         params.append(date_from + " 00:00:00")
     if date_to:
-        clauses.append("alert_dt <= ?")
+        clauses.append("REPLACE(alert_dt,'T',' ') <= ?")
         params.append(date_to   + " 23:59:59")
     if city:
         clauses.append("city LIKE ?")
@@ -1319,7 +1320,9 @@ def api_map():
     """מחזיר נקודות למפה: עיר, lat/lon, סה"כ התראות, קטגוריה שכיחה."""
     filter_where, filter_params = _parse_filters(request.args)
     # בנה WHERE שמשלב קואורדינטות קיימות + פילטרי המשתמש
+    # חשוב: _parse_filters מחזיר "city LIKE ?" — ב-JOIN יש a.city ו-c.city, נפתור עמימות
     extra = filter_where.replace("WHERE ", "AND ") if filter_where else ""
+    extra = extra.replace("city LIKE", "a.city LIKE")
     sql = f"""
         SELECT a.city, c.lat, c.lon, a.category, COUNT(*) as n
         FROM alerts a
