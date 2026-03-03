@@ -112,6 +112,13 @@ def init_db():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_dt ON alerts(alert_dt)")
+
+        # מגרציה: הוסף עמודת origin אם לא קיימת (נוצלה מייבוא CSV)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(alerts)").fetchall()]
+        if "origin" not in cols:
+            conn.execute("ALTER TABLE alerts ADD COLUMN origin TEXT DEFAULT ''")
+            log.info("מגרציה: עמודת origin נוספה")
+
         conn.commit()
 
 def _normalize(r, source):
