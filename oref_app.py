@@ -703,6 +703,14 @@ const TYPE_COLORS = {1:"FF4444",2:"FF8800",3:"AA44FF",4:"4488FF",5:"FF44AA",6:"F
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+function fmtDt(s) {
+  // מנרמל גם "YYYY-MM-DD HH:MM:SS" וגם "YYYY-MM-DDTHH:MM:SS"
+  const clean = String(s).replace('T', ' ');
+  const [date, time] = clean.split(' ');
+  const [y, m, d] = (date || '').split('-');
+  return `${d}-${m}-${y} ${(time || '').slice(0, 5)}`;
+}
+
 function colorFor(t) {
   if (t.includes("רקטות")||t.includes("טילים")) return "#ef5350";
   if (t.includes("ביטול")||t.includes("שגרה")||t.includes("לצאת")) return "#66bb6a";
@@ -867,7 +875,7 @@ async function refresh(filterParams) {
     recent.forEach(r => {
       const color = colorFor(r.title);
       tbody.innerHTML += `<tr>
-        <td>${r.alert_dt.slice(5,16)}</td>
+        <td>${fmtDt(r.alert_dt)}</td>
         <td>${esc(r.city)}</td>
         <td><span class="badge" style="background:${color}">${esc(r.title)}</span></td>
       </tr>`;
