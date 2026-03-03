@@ -585,15 +585,15 @@ HTML = """<!DOCTYPE html>
   .filter-group input:focus { outline: none; border-color: #42a5f5; }
   .filter-group input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.8); }
 
-  /* Type multi-select */
-  #type-select {
+  /* Type / Origin multi-select */
+  #type-select, #origin-select {
     background: #0d1b2a; border: 1px solid #1a3a5c; border-radius: 8px;
     color: #e8eaf6; font-family: Arial, sans-serif; font-size: .85rem;
     width: 100%; padding: 4px; min-height: 130px; resize: vertical;
   }
-  #type-select option { padding: 6px 10px; cursor: pointer; }
-  #type-select option:checked { background: #1565c0; color: #fff; }
-  #type-select:focus { outline: none; border-color: #42a5f5; }
+  #type-select option, #origin-select option { padding: 6px 10px; cursor: pointer; }
+  #type-select option:checked, #origin-select option:checked { background: #1565c0; color: #fff; }
+  #type-select:focus, #origin-select:focus { outline: none; border-color: #42a5f5; }
   .type-select-hint { font-size: .73rem; color: #546e7a; margin-top: 5px; }
 
   /* Filter actions */
@@ -685,7 +685,7 @@ HTML = """<!DOCTYPE html>
     </div>
 
     <div class="filter-row" style="align-items:flex-start">
-      <div class="filter-group" style="flex:1;min-width:260px">
+      <div class="filter-group" style="flex:3;min-width:200px">
         <label>סוגי התראות</label>
         <select multiple id="type-select" size="6">
           <option value="" disabled>טוען...</option>
@@ -696,8 +696,8 @@ HTML = """<!DOCTYPE html>
           <button class="btn-clear" onclick="clearTypes()" style="font-size:.75rem;padding:4px 10px;">✕ נקה</button>
         </div>
       </div>
-      <div class="filter-group" style="min-width:160px">
-        <label>מקור</label>
+      <div class="filter-group" style="flex:2;min-width:160px">
+        <label>מקור <span style="color:#546e7a;font-size:.72rem;font-weight:normal">— מדינה / ארגון מתקיף</span></label>
         <select multiple id="origin-select" size="6">
           <option value="" disabled>טוען...</option>
         </select>
