@@ -6,6 +6,8 @@
 • Flask מגיש ממשק ווב עברי + כפתור ייצוא Excel
 """
 
+import csv
+import hashlib
 import sqlite3
 import threading
 import time
@@ -53,6 +55,9 @@ STATIC_HISTORY_URL = ("https://www.oref.org.il/warningMessages/alert"
                       "/History/AlertsHistory.json")
 # התראות פעילות ברגע זה
 LIVE_URL    = ("https://www.oref.org.il/warningMessages/alert/Alerts.json")
+# ארכיון היסטורי מ-GitHub (עדכון יומי על ידי הקהילה)
+CSV_SOURCE_URL = ("https://raw.githubusercontent.com/yuval-harpaz/"
+                  "alarms/master/data/alarms.csv")
 
 CAT_NAMES = {
     1:  "ירי רקטות וטילים",
@@ -136,7 +141,6 @@ def _normalize(r, source):
         }
     # Alerts.json format: alertDate, data, title, category (no rid)
     # Use a synthetic rid based on timestamp+city hash to avoid collisions
-    import hashlib
     key = f"{r.get('alertDate','')}-{r.get('data','')}-{r.get('title','')}"
     synthetic_rid = int(hashlib.md5(key.encode()).hexdigest()[:8], 16) * -1
     return {
@@ -172,6 +176,73 @@ def insert_alerts(rows, source="history"):
                     log.warning("insert error: %s", e)
             conn.commit()
     return count
+
+def _csv_rid(csv_id: str, city: str, time_str: str) -> int:
+    """מחשב rid שלילי ייחודי לשורת CSV (זהה לאלגוריתם ב-import_csv.py)."""
+    key = f"csv-{csv_id}-{city}-{time_str}"
+    return int(hashlib.md5(key.encode()).hexdigest()[:8], 16) * -1
+
+
+def import_csv_rows(reader, batch_size: int = 1000) -> int:
+    """מייבא שורות מ-DictReader של CSV לתוך ה-DB. מחזיר מספר שורות חדשות שנוספו."""
+    CSV_CAT_NAMES = {
+        0: "", 1: "ירי רקטות וטילים", 2: "חדירת כלי טיס עוין",
+        3: "רעידת אדמה", 4: "חשש לצונאמי", 5: "אירוע חומרים מסוכנים",
+        6: "התרעה ביטחונית", 7: "גל חום", 8: "תרגיל",
+        13: "ביטול / חזרה לשגרה", 14: "הנחיות פיקוד העורף",
+        15: "חדירת כלי טיס", 101: "ירי רקטות",
+    }
+
+    batch  = []
+    total  = 0
+    errors = 0
+
+    def flush(b):
+        with _db_lock:
+            with get_db() as conn:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO alerts "
+                    "(rid, alert_dt, city, title, category, cat_desc, source, origin) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    b
+                )
+                conn.commit()
+
+    for row in reader:
+        try:
+            csv_id   = row.get("id",          "").strip()
+            city     = row.get("cities",       "").strip()
+            time_str = row.get("time",         "").strip()
+            desc     = row.get("description",  "").strip()
+            origin   = row.get("origin",       "").strip()
+            try:
+                category = int(row.get("threat", "0").strip())
+            except ValueError:
+                category = 0
+
+            rid      = _csv_rid(csv_id, city, time_str)
+            cat_desc = CSV_CAT_NAMES.get(category, desc)
+            title    = desc if desc else cat_desc
+
+            batch.append((rid, time_str, city, title, category, cat_desc, "csv", origin))
+            total += 1
+
+            if len(batch) >= batch_size:
+                flush(batch)
+                batch = []
+
+        except Exception as e:
+            errors += 1
+            if errors <= 5:
+                log.warning("CSV import row error: %s", e)
+
+    if batch:
+        flush(batch)
+
+    if errors:
+        log.warning("CSV import: %d שגיאות", errors)
+    return total
+
 
 def query_alerts(where="", params=()):
     with get_db() as conn:
@@ -1080,13 +1151,32 @@ def export():
     )
 
 def startup_backfill():
-    """טוען בהפעלה: היסטוריה סטטית (28/02 ואחורה) + GetAlarmsHistory עדכני."""
+    """טוען בהפעלה:
+    0. ארכיון CSV מ-GitHub (נתונים היסטוריים 2019–היום)
+    1. היסטוריה סטטית — AlertsHistory.json (נתוני אתמול וקודם)
+    2. GetAlarmsHistory — 3000 האחרונות (נתוני היום)
+    """
+
+    # 0. ארכיון GitHub CSV — מייבא רשומות חסרות בלבד (INSERT OR IGNORE)
+    try:
+        log.info("Backfill: מוריד ארכיון CSV מ-GitHub...")
+        resp = requests.get(CSV_SOURCE_URL, timeout=60)
+        resp.raise_for_status()
+        text = resp.content.decode("utf-8", errors="replace")
+        reader = csv.DictReader(io.StringIO(text))
+        before = get_stats()["total"]
+        import_csv_rows(reader)
+        after  = get_stats()["total"]
+        log.info("Backfill CSV: %d רשומות חדשות נוספו (סה\"כ %d)", after - before, after)
+    except Exception as e:
+        log.warning("Backfill CSV error: %s", e)
+
     # 1. היסטוריה סטטית — AlertsHistory.json (נתוני אתמול וקודם)
     try:
-        log.info("Backfill: טוען AlertsHistory.json (נתוני 28/02)...")
+        log.info("Backfill: טוען AlertsHistory.json...")
         data = fetch_json(STATIC_HISTORY_URL, headers=OREF_HEADERS)
         n = insert_alerts(data, source="history")
-        log.info("Backfill: נטענו %d רשומות היסטוריות מ-AlertsHistory.json", n)
+        log.info("Backfill: נטענו %d רשומות מ-AlertsHistory.json", n)
     except Exception as e:
         log.warning("Backfill AlertsHistory error: %s", e)
 
