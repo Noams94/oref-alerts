@@ -94,10 +94,19 @@ log = logging.getLogger("oref")
 # ─── Database ─────────────────────────────────────────────────────────────────
 _db_lock = threading.Lock()
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db(retries: int = 5, delay: float = 0.2):
+    """פותח חיבור SQLite עם ניסיונות חוזרים במקרה של disk I/O error."""
+    import time as _time
+    for attempt in range(retries):
+        try:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.OperationalError as e:
+            if attempt < retries - 1:
+                _time.sleep(delay * (attempt + 1))
+            else:
+                raise
 
 def init_db():
     with get_db() as conn:
@@ -211,15 +220,24 @@ def import_csv_rows(reader, batch_size: int = 1000) -> int:
     errors = 0
 
     def flush(b):
-        with _db_lock:
-            with get_db() as conn:
-                conn.executemany(
-                    "INSERT OR IGNORE INTO alerts "
-                    "(rid, alert_dt, city, title, category, cat_desc, source, origin) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
-                    b
-                )
-                conn.commit()
+        import time as _time
+        for attempt in range(4):
+            try:
+                with _db_lock:
+                    with get_db() as conn:
+                        conn.executemany(
+                            "INSERT OR IGNORE INTO alerts "
+                            "(rid, alert_dt, city, title, category, cat_desc, source, origin) "
+                            "VALUES (?,?,?,?,?,?,?,?)",
+                            b
+                        )
+                        conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if attempt < 3:
+                    _time.sleep(0.3 * (attempt + 1))
+                else:
+                    log.warning("CSV flush error (skip batch): %s", e)
 
     for row in reader:
         try:
@@ -1612,8 +1630,11 @@ def startup_backfill():
         log.warning("Backfill GetAlarmsHistory error: %s", e)
 
     _state["last_history"] = datetime.now().strftime("%H:%M:%S")
-    total = get_stats()["total"]
-    log.info("Backfill הושלם — סה\"כ %d רשומות ב-DB", total)
+    try:
+        total = get_stats()["total"]
+        log.info("Backfill הושלם — סה\"כ %d רשומות ב-DB", total)
+    except Exception as e:
+        log.warning("Backfill: לא ניתן לקרוא סטטיסטיקות (%s)", e)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
