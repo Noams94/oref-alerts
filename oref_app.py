@@ -965,11 +965,15 @@ function fmtDt(s) {
 }
 
 function colorFor(t) {
-  if (t.includes("רקטות")||t.includes("טילים")) return "#ef5350";
-  if (t.includes("ביטול")||t.includes("שגרה")||t.includes("לצאת")) return "#66bb6a";
-  if (t.includes("הנחיות")||t.includes("להישאר")||t.includes("סמיכות")) return "#ffa726";
-  if (t.includes("כלי טיס")) return "#ff7043";
-  if (t.includes("בדקות")) return "#78909c";
+  if (!t) return "#78909c";
+  if (t.includes("רקטות")||t.includes("טילים"))              return "#ef5350"; // אדום
+  if (t.includes("כלי טיס"))                                  return "#ff7043"; // כתום-אדום
+  if (t.includes("ביטול")||t.includes("שגרה"))                return "#66bb6a"; // ירוק
+  if (t.includes("הנחיות")||t.includes("להישאר")||t.includes("סמיכות")) return "#ffa726"; // כתום
+  if (t.includes("חומרים")||t.includes("חומ"))                return "#ab47bc"; // סגול
+  if (t.includes("ביטחונית")||t.includes("חדירת"))            return "#ff7043"; // כתום-אדום
+  if (t.includes("רעידת")||t.includes("צונאמי"))              return "#7e57c2"; // סגול-כחול
+  if (t.includes("תרגיל"))                                     return "#78909c"; // אפור
   return "#78909c";
 }
 
@@ -1239,22 +1243,21 @@ function initMap() {
 
 function updateLegend(points) {
   if (!_legendEl) return;
-  // אסוף את הקטגוריות הייחודיות שמופיעות בנתונים הנוכחיים, ממוינות לפי שכיחות
-  const catCount = {};
+  // אסוף כותרות ייחודיות ממוינות לפי מספר ערים
+  const titleCount = {};
   points.forEach(p => {
-    catCount[p.top_cat] = (catCount[p.top_cat] || 0) + p.total;
+    titleCount[p.top_title] = (titleCount[p.top_title] || 0) + p.total;
   });
-  const cats = Object.keys(catCount).map(Number).sort((a, b) => catCount[b] - catCount[a]);
+  const titles = Object.keys(titleCount).sort((a, b) => titleCount[b] - titleCount[a]);
 
-  if (cats.length === 0) {
+  if (titles.length === 0) {
     _legendEl.innerHTML = '<div style="color:#546e7a">אין נתונים</div>';
     return;
   }
   _legendEl.innerHTML =
-    cats.map(c => {
-      const color = MAP_CAT_COLORS[c] || "#78909c";
-      const label = MAP_CAT_LABELS[c] || ("קטגוריה " + c);
-      return `<div><span style="background:${color}"></span>${label}</div>`;
+    titles.map(t => {
+      const color = colorFor(t);
+      return `<div><span style="background:${color}"></span>${esc(t)}</div>`;
     }).join("") +
     '<div style="color:#546e7a;margin-top:4px;border-top:1px solid #1a3a5c;padding-top:4px">גודל = מספר התראות</div>';
 }
@@ -1283,7 +1286,8 @@ async function refreshMap(filterParams) {
 
     _mapMarkers.clearLayers();
     points.forEach(p => {
-      const color = MAP_CAT_COLORS[p.top_cat] || "#78909c";
+      // צבע לפי כותרת (colorFor) — אמין יותר מה-category שבDB
+      const color = colorFor(p.top_title);
       // רדיוס לוגריתמי — min 5, max 30
       const r = Math.max(5, Math.min(30, 5 + Math.log10(p.total + 1) * 8));
       const circle = L.circleMarker([p.lat, p.lon], {
@@ -1291,14 +1295,14 @@ async function refreshMap(filterParams) {
         weight: 1, opacity: 0.9, fillOpacity: 0.75,
       });
       circle.bindPopup(
-        `<b>${p.city}</b><br>` +
+        `<b>${esc(p.city)}</b><br>` +
         `סה"כ: <b>${p.total.toLocaleString()}</b> התראות<br>` +
-        `סוג עיקרי: ${MAP_CAT_LABELS[p.top_cat] || p.top_cat}`
+        `סוג עיקרי: ${esc(p.top_title)}`
       );
       _mapMarkers.addLayer(circle);
     });
 
-    // עדכן מקרא לפי הקטגוריות שבאמת מופיעות בנתונים הנוכחיים
+    // עדכן מקרא לפי הכותרות שבאמת מופיעות בנתונים הנוכחיים
     updateLegend(points);
 
   } catch(e) {
@@ -1381,50 +1385,49 @@ def api_origins():
 
 @app.route("/api/map")
 def api_map():
-    """מחזיר נקודות למפה: עיר, lat/lon, סה"כ התראות, קטגוריה שכיחה."""
+    """מחזיר נקודות למפה: עיר, lat/lon, סה"כ התראות, כותרת שכיחה.
+    צובע לפי title (לא category) כי ה-category ב-CSV לא תמיד תואם לכותרת."""
     filter_where, filter_params = _parse_filters(request.args)
-    # בנה WHERE שמשלב קואורדינטות קיימות + פילטרי המשתמש
-    # חשוב: _parse_filters מחזיר "city LIKE ?" — ב-JOIN יש a.city ו-c.city, נפתור עמימות
+    # חשוב: _parse_filters מחזיר "city LIKE ?" — ב-JOIN יש a.city ו-c.city
     extra = filter_where.replace("WHERE ", "AND ") if filter_where else ""
     extra = extra.replace("city LIKE", "a.city LIKE")
     sql = f"""
-        SELECT a.city, c.lat, c.lon, a.category, COUNT(*) as n
+        SELECT a.city, c.lat, c.lon, a.title, COUNT(*) as n
         FROM alerts a
         JOIN city_coords c ON a.city = c.city
         WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
         {extra}
-        GROUP BY a.city, a.category
+        GROUP BY a.city, a.title
     """
     with get_db() as conn:
         rows = conn.execute(sql, filter_params).fetchall()
 
-    # קיבוץ לפי עיר
+    # קיבוץ לפי עיר — top_title = הכותרת עם הכי הרבה התראות
     cities = {}
     for r in rows:
         city = r["city"]
         if city not in cities:
             cities[city] = {
-                "city": city,
-                "lat":  r["lat"],
-                "lon":  r["lon"],
-                "total": 0,
-                "cats": {},
+                "city":   city,
+                "lat":    r["lat"],
+                "lon":    r["lon"],
+                "total":  0,
+                "titles": {},
             }
         cities[city]["total"] += r["n"]
-        cities[city]["cats"][r["category"]] = (
-            cities[city]["cats"].get(r["category"], 0) + r["n"]
+        cities[city]["titles"][r["title"]] = (
+            cities[city]["titles"].get(r["title"], 0) + r["n"]
         )
 
-    # בחר קטגוריה שכיחה לכל עיר
     result = []
     for d in cities.values():
-        top_cat = max(d["cats"], key=d["cats"].get)
+        top_title = max(d["titles"], key=d["titles"].get)
         result.append({
-            "city":     d["city"],
-            "lat":      d["lat"],
-            "lon":      d["lon"],
-            "total":    d["total"],
-            "top_cat":  top_cat,
+            "city":      d["city"],
+            "lat":       d["lat"],
+            "lon":       d["lon"],
+            "total":     d["total"],
+            "top_title": top_title,
         })
 
     return jsonify(result)
