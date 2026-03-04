@@ -819,6 +819,18 @@ HTML = """<!DOCTYPE html>
   .map-title  { font-size: 1.05rem; color: #90caf9; margin-bottom: 10px;
                 padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
   .geocode-bar { font-size: .72rem; color: #546e7a; margin-top: 6px; }
+  /* ── Map type filter panel ── */
+  #map-type-panel { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .mtp-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #0d2137; border: 1px solid #1a3a5c; border-radius: 20px;
+    padding: 3px 10px; font-size: .76rem; cursor: pointer; user-select: none;
+    transition: opacity .15s, border-color .15s;
+  }
+  .mtp-chip:hover { border-color: #42a5f5; }
+  .mtp-chip input[type=checkbox] { cursor: pointer; accent-color: #42a5f5; margin: 0; }
+  .mtp-chip.mtp-off { opacity: .35; }
+  .mtp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   /* override Leaflet popup for dark theme */
   .leaflet-popup-content-wrapper { background: #0d2137; color: #e8eaf6;
     border: 1px solid #1a3a5c; border-radius: 8px; }
@@ -944,6 +956,7 @@ HTML = """<!DOCTYPE html>
   <div class="map-col">
     <div class="map-title">🗺️ מפת התראות לפי יישוב</div>
     <div id="map"></div>
+    <div id="map-type-panel"></div>
     <div class="geocode-bar" id="geocode-bar">טוען קואורדינטות...</div>
   </div>
 
@@ -1218,8 +1231,9 @@ const MAP_CAT_LABELS = {
 
 let _map = null;
 let _mapMarkers = null;   // מאותחל בתוך initMap (Leaflet אולי עוד לא נטען ברמה הגלובלית)
-
-let _legendEl = null;   // אלמנט ה-DOM של המקרא — מעודכן דינמית
+let _legendEl    = null;  // אלמנט ה-DOM של המקרא — מעודכן דינמית
+let _mapPoints   = [];    // נקודות המפה האחרונות מה-API
+let _mapHidden   = new Set();  // כותרות שהמשתמש הסתיר בפאנל
 
 function initMap() {
   if (_map) return;
@@ -1262,6 +1276,89 @@ function updateLegend(points) {
     '<div style="color:#546e7a;margin-top:4px;border-top:1px solid #1a3a5c;padding-top:4px">גודל = מספר התראות</div>';
 }
 
+/* ── Map type filter panel ── */
+function renderMapPoints() {
+  if (!_map || !_mapMarkers) return;
+  _mapMarkers.clearLayers();
+  const visible = _mapPoints.filter(p => !_mapHidden.has(p.top_title));
+  visible.forEach(p => {
+    const color = colorFor(p.top_title);
+    const r = Math.max(5, Math.min(30, 5 + Math.log10(p.total + 1) * 8));
+    const circle = L.circleMarker([p.lat, p.lon], {
+      radius: r, fillColor: color, color: "#fff",
+      weight: 1, opacity: 0.9, fillOpacity: 0.75,
+    });
+    circle.bindPopup(
+      `<b>${esc(p.city)}</b><br>` +
+      `סה"כ: <b>${p.total.toLocaleString()}</b> התראות<br>` +
+      `סוג עיקרי: ${esc(p.top_title)}`
+    );
+    _mapMarkers.addLayer(circle);
+  });
+  updateLegend(visible);
+}
+
+function buildMapTypePanel() {
+  const panel = document.getElementById("map-type-panel");
+  if (!panel) return;
+
+  // ספור התראות לפי כותרת (עיר × title → total)
+  const titleCount = {};
+  _mapPoints.forEach(p => {
+    titleCount[p.top_title] = (titleCount[p.top_title] || 0) + p.total;
+  });
+  const titles = Object.keys(titleCount).sort((a, b) => titleCount[b] - titleCount[a]);
+
+  panel.innerHTML = '';
+  if (titles.length === 0) return;
+
+  titles.forEach(t => {
+    const color   = colorFor(t);
+    const checked = !_mapHidden.has(t);
+
+    const label = document.createElement('label');
+    label.className   = 'mtp-chip' + (checked ? '' : ' mtp-off');
+    label.dataset.title = t;
+
+    const cb = document.createElement('input');
+    cb.type    = 'checkbox';
+    cb.checked = checked;
+    cb.addEventListener('change', function() { onMapTypeChange(t, this.checked); });
+
+    const dot = document.createElement('span');
+    dot.className      = 'mtp-dot';
+    dot.style.background = color;
+
+    const countEl = document.createElement('span');
+    countEl.style.cssText = 'color:#546e7a;font-size:.7rem';
+    countEl.textContent   = ' (' + titleCount[t].toLocaleString() + ')';
+
+    label.appendChild(cb);
+    label.appendChild(dot);
+    label.append(' ' + t);
+    label.appendChild(countEl);
+    panel.appendChild(label);
+  });
+}
+
+function onMapTypeChange(title, checked) {
+  if (checked) {
+    _mapHidden.delete(title);
+  } else {
+    _mapHidden.add(title);
+  }
+  // עדכן מצב ויזואלי של ה-chip (ללא בנייה מחדש של הפאנל)
+  const panel = document.getElementById("map-type-panel");
+  if (panel) {
+    panel.querySelectorAll('.mtp-chip').forEach(chip => {
+      if (chip.dataset.title === title) {
+        chip.classList.toggle('mtp-off', !checked);
+      }
+    });
+  }
+  renderMapPoints();
+}
+
 async function refreshMap(filterParams) {
   initMap();
   if (!_map || !_mapMarkers) return;   // Leaflet לא נטען — לא קורסים
@@ -1284,26 +1381,11 @@ async function refreshMap(filterParams) {
       }
     }
 
-    _mapMarkers.clearLayers();
-    points.forEach(p => {
-      // צבע לפי כותרת (colorFor) — אמין יותר מה-category שבDB
-      const color = colorFor(p.top_title);
-      // רדיוס לוגריתמי — min 5, max 30
-      const r = Math.max(5, Math.min(30, 5 + Math.log10(p.total + 1) * 8));
-      const circle = L.circleMarker([p.lat, p.lon], {
-        radius: r, fillColor: color, color: "#fff",
-        weight: 1, opacity: 0.9, fillOpacity: 0.75,
-      });
-      circle.bindPopup(
-        `<b>${esc(p.city)}</b><br>` +
-        `סה"כ: <b>${p.total.toLocaleString()}</b> התראות<br>` +
-        `סוג עיקרי: ${esc(p.top_title)}`
-      );
-      _mapMarkers.addLayer(circle);
-    });
-
-    // עדכן מקרא לפי הכותרות שבאמת מופיעות בנתונים הנוכחיים
-    updateLegend(points);
+    // שמור נקודות ואפס הסתרות בכל עדכון פילטר חיצוני
+    _mapPoints = points;
+    _mapHidden.clear();
+    buildMapTypePanel();
+    renderMapPoints();
 
   } catch(e) {
     console.warn("Map refresh error:", e);
