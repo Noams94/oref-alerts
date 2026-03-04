@@ -1215,6 +1215,8 @@ const MAP_CAT_LABELS = {
 let _map = null;
 let _mapMarkers = null;   // מאותחל בתוך initMap (Leaflet אולי עוד לא נטען ברמה הגלובלית)
 
+let _legendEl = null;   // אלמנט ה-DOM של המקרא — מעודכן דינמית
+
 function initMap() {
   if (_map) return;
   if (typeof L === "undefined") { console.warn("Leaflet not loaded"); return; }
@@ -1225,16 +1227,36 @@ function initMap() {
   }).addTo(_map);
   _mapMarkers = L.layerGroup().addTo(_map);
 
-  // Legend
-  const legend = L.control({ position: "bottomleft" });
-  legend.onAdd = () => {
-    const d = L.DomUtil.create("div", "map-legend");
-    d.innerHTML = [1,2,13,14].map(c =>
-      `<div><span style="background:#${(MAP_CAT_COLORS[c]||'#aaa').replace('#','')}"></span>${MAP_CAT_LABELS[c]||c}</div>`
-    ).join("") + '<div style="color:#546e7a;margin-top:4px">גודל = מספר התראות</div>';
-    return d;
+  // מקרא דינמי — ה-div נשמר ב-_legendEl לעדכון עתידי
+  const legendCtrl = L.control({ position: "bottomleft" });
+  legendCtrl.onAdd = () => {
+    _legendEl = L.DomUtil.create("div", "map-legend");
+    _legendEl.innerHTML = '<div style="color:#546e7a">טוען...</div>';
+    return _legendEl;
   };
-  legend.addTo(_map);
+  legendCtrl.addTo(_map);
+}
+
+function updateLegend(points) {
+  if (!_legendEl) return;
+  // אסוף את הקטגוריות הייחודיות שמופיעות בנתונים הנוכחיים, ממוינות לפי שכיחות
+  const catCount = {};
+  points.forEach(p => {
+    catCount[p.top_cat] = (catCount[p.top_cat] || 0) + p.total;
+  });
+  const cats = Object.keys(catCount).map(Number).sort((a, b) => catCount[b] - catCount[a]);
+
+  if (cats.length === 0) {
+    _legendEl.innerHTML = '<div style="color:#546e7a">אין נתונים</div>';
+    return;
+  }
+  _legendEl.innerHTML =
+    cats.map(c => {
+      const color = MAP_CAT_COLORS[c] || "#78909c";
+      const label = MAP_CAT_LABELS[c] || ("קטגוריה " + c);
+      return `<div><span style="background:${color}"></span>${label}</div>`;
+    }).join("") +
+    '<div style="color:#546e7a;margin-top:4px;border-top:1px solid #1a3a5c;padding-top:4px">גודל = מספר התראות</div>';
 }
 
 async function refreshMap(filterParams) {
@@ -1275,6 +1297,10 @@ async function refreshMap(filterParams) {
       );
       _mapMarkers.addLayer(circle);
     });
+
+    // עדכן מקרא לפי הקטגוריות שבאמת מופיעות בנתונים הנוכחיים
+    updateLegend(points);
+
   } catch(e) {
     console.warn("Map refresh error:", e);
   }
