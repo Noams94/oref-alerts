@@ -1159,11 +1159,17 @@ async function loadOrigins() {
 async function refresh(filterParams) {
   const fp = filterParams || buildFilterParams();
   const qs = fp.toString() ? "?" + fp.toString() : "";
-  const [stats, state, recent] = await Promise.all([
-    fetch("/api/stats"  + qs).then(r => r.json()),
-    fetch("/api/state").then(r => r.json()),
-    fetch("/api/recent" + qs).then(r => r.json()),
-  ]);
+  let stats, state, recent;
+  try {
+    [stats, state, recent] = await Promise.all([
+      fetch("/api/stats"  + qs).then(r => r.json()),
+      fetch("/api/state").then(r => r.json()),
+      fetch("/api/recent" + qs).then(r => r.json()),
+    ]);
+  } catch(e) {
+    console.warn("Refresh fetch error:", e);
+    return;
+  }
   refreshMap(fp);   // מרענן גם את המפה (async — לא חוסם)
 
   document.getElementById("total").textContent     = stats.total.toLocaleString();
