@@ -58,6 +58,9 @@ LIVE_URL    = ("https://www.oref.org.il/warningMessages/alert/Alerts.json")
 # ארכיון היסטורי מ-GitHub (עדכון יומי על ידי הקהילה)
 CSV_SOURCE_URL = ("https://raw.githubusercontent.com/yuval-harpaz/"
                   "alarms/master/data/alarms.csv")
+# טבלת קואורדינטות ישראלית מדויקת מ-GitHub (1,648 יישובים)
+COORD_CSV_URL  = ("https://raw.githubusercontent.com/yuval-harpaz/"
+                  "alarms/master/data/coord.csv")
 
 CAT_NAMES = {
     1:  "ירי רקטות וטילים",
@@ -404,6 +407,41 @@ def collect_history():
         except Exception as e:
             log.warning("History fetch error: %s", e)
         time.sleep(HISTORY_INTERVAL)
+
+
+# ─── Coordinates (coord.csv from GitHub) ─────────────────────────────────────
+def import_coord_csv() -> int:
+    """מוריד coord.csv מ-GitHub ומייבא קואורדינטות מדויקות ל-city_coords.
+    משתמש ב-INSERT OR REPLACE כדי לדרוס תוצאות שגויות של Nominatim.
+    מחזיר מספר הרשומות שנוספו/עודכנו."""
+    import csv as _csv
+    log.info("Coord import: מוריד coord.csv מ-GitHub...")
+    resp = requests.get(COORD_CSV_URL, timeout=30)
+    resp.raise_for_status()
+    reader = _csv.DictReader(io.StringIO(resp.content.decode("utf-8", errors="replace")))
+    batch = []
+    for row in reader:
+        loc = row.get("loc", "").lstrip("'").strip()
+        if not loc:
+            continue
+        try:
+            lat = float(row["lat"])
+            lon = float(row["long"])
+        except (ValueError, KeyError):
+            continue
+        batch.append((loc, lat, lon, "coord_csv"))
+
+    if not batch:
+        return 0
+    with _db_lock:
+        with get_db() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO city_coords (city, lat, lon, source) VALUES (?,?,?,?)",
+                batch
+            )
+            conn.commit()
+    log.info("Coord import: %d יישובים נטענו מ-coord.csv", len(batch))
+    return len(batch)
 
 
 # ─── Geocoder (Nominatim) ─────────────────────────────────────────────────────
@@ -1412,12 +1450,19 @@ def export():
 
 def startup_backfill():
     """טוען בהפעלה:
-    0. ארכיון CSV מ-GitHub (נתונים היסטוריים 2019–היום)
-    1. היסטוריה סטטית — AlertsHistory.json (נתוני אתמול וקודם)
-    2. GetAlarmsHistory — 3000 האחרונות (נתוני היום)
+    0a. coord.csv — קואורדינטות מדויקות של יישובים ישראלים
+    0b. ארכיון CSV מ-GitHub (נתונים היסטוריים 2019–היום)
+    1.  היסטוריה סטטית — AlertsHistory.json (נתוני אתמול וקודם)
+    2.  GetAlarmsHistory — 3000 האחרונות (נתוני היום)
     """
 
-    # 0. ארכיון GitHub CSV — מייבא רשומות חסרות בלבד (INSERT OR IGNORE)
+    # 0a. coord.csv — טבלת קואורדינטות מדויקות (1,648 יישובים ישראלים)
+    try:
+        import_coord_csv()
+    except Exception as e:
+        log.warning("Backfill coord.csv error: %s", e)
+
+    # 0b. ארכיון GitHub CSV — מייבא רשומות חסרות בלבד (INSERT OR IGNORE)
     try:
         log.info("Backfill: מוריד ארכיון CSV מ-GitHub...")
         resp = requests.get(CSV_SOURCE_URL, timeout=60)
