@@ -778,6 +778,10 @@ HTML = """<!DOCTYPE html>
   }
   .preset-btn:hover { border-color: #42a5f5; color: #42a5f5; background: rgba(66,165,245,.08); }
   .preset-btn.active-preset { border-color: #42a5f5; background: rgba(66,165,245,.15); color: #e8eaf6; }
+  .preset-btn.op-btn { border-color: #7e57c2; color: #ce93d8; }
+  .preset-btn.op-btn:hover { border-color: #ce93d8; color: #e1bee7; background: rgba(206,147,216,.08); }
+  .preset-btn.op-btn.active-preset { border-color: #ce93d8; background: rgba(206,147,216,.18); color: #e1bee7; }
+  .preset-sep { width: 1px; background: #1a3a5c; align-self: stretch; margin: 0 2px; }
 
   /* Filter rows */
   .filter-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-end; }
@@ -904,6 +908,9 @@ HTML = """<!DOCTYPE html>
       <button class="preset-btn" id="preset-3days"     onclick="setPreset('3days')">3 ימים אחרונים</button>
       <button class="preset-btn" id="preset-week"      onclick="setPreset('week')">שבוע אחרון</button>
       <button class="preset-btn" id="preset-all"       onclick="setPreset('all')">הכל</button>
+      <div class="preset-sep"></div>
+      <button class="preset-btn op-btn" id="preset-lion" onclick="setPreset('lion')" title="28.2.2026 — היום">🦁 שאגת הארי</button>
+      <button class="preset-btn op-btn" id="preset-lioness" onclick="setPreset('lioness')" title="13.6.2025 — 25.6.2025">🐆 עם כלביא</button>
     </div>
 
     <div class="filter-row">
@@ -1039,6 +1046,8 @@ function setPreset(p) {
   else if (p === "yesterday") { const y = shiftDay(today,-1); from.value = fmt(y); to.value = fmt(y); }
   else if (p === "3days")     { from.value = fmt(shiftDay(today,-2)); to.value = fmt(today); }
   else if (p === "week")      { from.value = fmt(shiftDay(today,-6)); to.value = fmt(today); }
+  else if (p === "lion")      { from.value = "2026-02-28"; to.value = ""; }
+  else if (p === "lioness")   { from.value = "2025-06-13"; to.value = "2025-06-25"; }
   else                        { from.value = ""; to.value = ""; }
   applyFilters();
 }
@@ -1052,6 +1061,8 @@ function detectPreset() {
   else if (from === today && to === today) document.getElementById("preset-today").classList.add("active-preset");
   else if (from === fmt(shiftDay(new Date(),-1)) && to === from) document.getElementById("preset-yesterday").classList.add("active-preset");
   else if (from === fmt(shiftDay(new Date(),-6)) && to === today) document.getElementById("preset-week").classList.add("active-preset");
+  else if (from === "2026-02-28" && !to) document.getElementById("preset-lion").classList.add("active-preset");
+  else if (from === "2025-06-13" && to === "2025-06-25") document.getElementById("preset-lioness").classList.add("active-preset");
 }
 
 /* ── Collapsible panel ── */
