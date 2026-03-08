@@ -94,19 +94,21 @@ log = logging.getLogger("oref")
 # ─── Database ─────────────────────────────────────────────────────────────────
 _db_lock = threading.Lock()
 
-def get_db(retries: int = 5, delay: float = 0.2):
-    """פותח חיבור SQLite עם ניסיונות חוזרים במקרה של disk I/O error."""
+def get_db(retries: int = 5, delay: float = 0.3):
+    """פותח חיבור SQLite עם ניסיונות חוזרים במקרה של disk I/O / authorization error."""
     import time as _time
+    last_err = None
     for attempt in range(retries):
         try:
             conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15)
             conn.row_factory = sqlite3.Row
             return conn
-        except sqlite3.OperationalError as e:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+            last_err = e
             if attempt < retries - 1:
+                log.warning("get_db attempt %d failed: %s — retrying...", attempt + 1, e)
                 _time.sleep(delay * (attempt + 1))
-            else:
-                raise
+    raise last_err
 
 def init_db():
     with get_db() as conn:
@@ -1197,6 +1199,8 @@ async function refresh(filterParams) {
     ]);
   } catch(e) {
     console.warn("Refresh fetch error:", e);
+    const rb = document.getElementById("result-bar");
+    if (rb) { rb.className = "result-bar empty"; rb.textContent = "⚠️ שגיאת תקשורת עם השרת — מנסה שוב..."; }
     return;
   }
   refreshMap(fp);   // מרענן גם את המפה (async — לא חוסם)
