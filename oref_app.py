@@ -855,6 +855,46 @@ HTML = """<!DOCTYPE html>
   .mtp-chip input[type=checkbox] { cursor: pointer; accent-color: #42a5f5; margin: 0; }
   .mtp-chip.mtp-off { opacity: .35; }
   .mtp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  /* ── Map expand button ── */
+  .map-title-row { display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1f4e79; }
+  .map-title-row .map-title { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+  .map-expand-btn {
+    background: none; border: 1px solid #1a3a5c; border-radius: 6px;
+    color: #78909c; cursor: pointer; padding: 3px 8px; font-size: .85rem;
+    transition: all .15s; line-height: 1;
+  }
+  .map-expand-btn:hover { border-color: #42a5f5; color: #42a5f5; background: rgba(66,165,245,.08); }
+
+  /* ── Map fullscreen modal ── */
+  #map-modal {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: rgba(0,0,0,.75); backdrop-filter: blur(3px);
+    align-items: center; justify-content: center;
+  }
+  #map-modal.open { display: flex; }
+  #map-modal-box {
+    width: 92vw; height: 88vh; background: #0d1b2a;
+    border: 1px solid #1a3a5c; border-radius: 16px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 8px 40px rgba(0,0,0,.7);
+  }
+  #map-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid #1f4e79; flex-shrink: 0;
+  }
+  #map-modal-header span { color: #90caf9; font-size: 1.05rem; }
+  #map-modal-close {
+    background: none; border: 1px solid #1a3a5c; border-radius: 6px;
+    color: #90caf9; cursor: pointer; padding: 4px 10px; font-size: 1rem;
+    transition: all .15s;
+  }
+  #map-modal-close:hover { border-color: #ef5350; color: #ef5350; background: rgba(239,83,80,.08); }
+  #map-modal-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+  #map-modal-body #map { height: 100% !important; border-radius: 0; border: none; flex: 1; }
+  #map-modal-panel { padding: 8px 14px; border-top: 1px solid #1a3a5c; flex-shrink: 0; }
+  #map-modal-panel #map-type-panel { margin-top: 0; }
+
   /* override Leaflet popup for dark theme */
   .leaflet-popup-content-wrapper { background: #0d2137; color: #e8eaf6;
     border: 1px solid #1a3a5c; border-radius: 8px; }
@@ -981,10 +1021,27 @@ HTML = """<!DOCTYPE html>
 
   <!-- ── מפה ── -->
   <div class="map-col">
-    <div class="map-title">🗺️ מפת התראות לפי יישוב</div>
-    <div id="map"></div>
-    <div id="map-type-panel"></div>
+    <div class="map-title-row">
+      <div class="map-title">🗺️ מפת התראות לפי יישוב</div>
+      <button class="map-expand-btn" onclick="openMapModal()" title="הגדל מפה">⛶ הגדל</button>
+    </div>
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="map-type-panel"></div>
+    </div>
     <div class="geocode-bar" id="geocode-bar">טוען קואורדינטות...</div>
+  </div>
+
+  <!-- ── מודל מפה מוגדלת ── -->
+  <div id="map-modal">
+    <div id="map-modal-box">
+      <div id="map-modal-header">
+        <span>🗺️ מפת התראות לפי יישוב</span>
+        <button id="map-modal-close" onclick="closeMapModal()" title="סגור (Esc)">✕ סגור</button>
+      </div>
+      <div id="map-modal-body"></div>
+      <div id="map-modal-panel"></div>
+    </div>
   </div>
 
 </div>
@@ -1430,6 +1487,54 @@ async function refreshMap(filterParams) {
     console.warn("Map refresh error:", e);
   }
 }
+
+/* ── Map modal ── */
+let _mapInModal = false;
+
+function openMapModal() {
+  if (_mapInModal) return;
+  _mapInModal = true;
+
+  // העבר את #map ו-#map-type-panel לתוך המודל
+  const mapEl  = document.getElementById("map");
+  const panelEl = document.getElementById("map-type-panel");
+  const body   = document.getElementById("map-modal-body");
+  const mPanel = document.getElementById("map-modal-panel");
+
+  body.appendChild(mapEl);
+  mPanel.appendChild(panelEl);
+
+  document.getElementById("map-modal").classList.add("open");
+  document.body.style.overflow = "hidden";
+
+  // Leaflet חייב לדעת שגודל הקונטיינר השתנה
+  if (_map) { setTimeout(() => _map.invalidateSize(), 80); }
+}
+
+function closeMapModal() {
+  if (!_mapInModal) return;
+  _mapInModal = false;
+
+  // החזר את #map ו-#map-type-panel למקומם המקורי
+  const mapEl   = document.getElementById("map");
+  const panelEl = document.getElementById("map-type-panel");
+  const wrap    = document.getElementById("map-wrap");
+
+  wrap.insertBefore(mapEl, wrap.firstChild);
+  wrap.appendChild(panelEl);
+
+  document.getElementById("map-modal").classList.remove("open");
+  document.body.style.overflow = "";
+
+  if (_map) { setTimeout(() => _map.invalidateSize(), 80); }
+}
+
+// סגירה ב-Esc
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeMapModal(); });
+// סגירה בלחיצה מחוץ לקופסה
+document.getElementById("map-modal").addEventListener("click", e => {
+  if (e.target === document.getElementById("map-modal")) closeMapModal();
+});
 
 /* ── Init ── */
 let cd = 15;
