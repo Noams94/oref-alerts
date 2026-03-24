@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0d1b2a;
+  --foreground: #e8eaf6;
+  --card: #1b2838;
+  --card-border: #2a3a4e;
+  --accent-red: #ef5350;
+  --accent-blue: #42a5f5;
+  --accent-green: #66bb6a;
+  --accent-yellow: #ffca28;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  direction: rtl;
+}
