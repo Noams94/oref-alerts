@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { LIVE_URL, HISTORY_URL, OREF_HEADERS, alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
 import { insertAlert, ensureSchema } from "@/lib/db";
 
@@ -83,8 +83,15 @@ export async function GET() {
       }
     }
 
-    // Fire-and-forget history sync (throttled to every 5 min)
-    syncHistory().catch(() => {});
+    // Run history sync in the background AFTER response is sent
+    // Using after() ensures it completes even in serverless
+    after(async () => {
+      try {
+        await syncHistory();
+      } catch (e) {
+        console.error("Background history sync error:", e);
+      }
+    });
 
     return NextResponse.json(liveAlerts);
   } catch {

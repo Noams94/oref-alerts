@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Alert } from "@/lib/oref";
-import { colorForTitle } from "@/lib/oref";
+import { colorForTitle, originToHebrew } from "@/lib/oref";
 
 function formatDate(dt: string): string {
   try {
@@ -87,7 +87,7 @@ export default function AlertTable({ filters }: { filters: string }) {
                     {a.title}
                   </td>
                   <td className="px-4 py-2 text-gray-400 text-xs">
-                    {a.origin}
+                    {originToHebrew(a.origin)}
                   </td>
                 </tr>
               ))

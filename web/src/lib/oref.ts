@@ -111,6 +111,23 @@ export function toIsraelISO(dt: string): string {
   }
 }
 
+// ─── Origin translations ──────────────────────────────────────────────────
+
+export const ORIGIN_HEBREW: Record<string, string> = {
+  Gaza: "עזה",
+  Lebanon: "לבנון",
+  Iran: "אירן",
+  Yemen: "תימן",
+  Syria: "סוריה",
+  Iraq: "עיראק",
+  Israel: "ישראל",
+  FA: "התרעת שווא",
+};
+
+export function originToHebrew(origin: string): string {
+  return ORIGIN_HEBREW[origin] ?? origin;
+}
+
 // ─── Hash for dedup ────────────────────────────────────────────────────────
 
 export function alertHash(dt: string, city: string, title: string): string {

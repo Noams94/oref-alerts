@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { originToHebrew } from "@/lib/oref";
 
 interface FilterState {
   date_from: string;
@@ -366,7 +367,7 @@ export default function FilterPanel({
                     <span className="text-gray-500 font-mono text-[10px]">
                       ({o.total.toLocaleString("he-IL")})
                     </span>
-                    <span>{o.origin}</span>
+                    <span>{originToHebrew(o.origin)}</span>
                   </button>
                 ))}
               </div>
