@@ -3,10 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 export default function LivePoller() {
   const [status, setStatus] = useState<"idle" | "polling" | "error">("idle");
-  const [lastLivePoll, setLastLivePoll] = useState<string>("—");
-  const [lastHistorySync, setLastHistorySync] = useState<string>("—");
-  const [historyStatus, setHistoryStatus] = useState<string>("");
-  const [liveCount, setLiveCount] = useState(0);
+  const [lastSync, setLastSync] = useState<string>("—");
+  const [syncInfo, setSyncInfo] = useState<string>("");
   const [errorCount, setErrorCount] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -14,8 +12,8 @@ export default function LivePoller() {
     async function poll() {
       setStatus("polling");
       try {
+        // /api/live now syncs last 5000 rows from GitHub CSV (accessible from Vercel)
         const res = await fetch("/api/live");
-
         if (!res.ok) {
           setStatus("error");
           setErrorCount((prev) => prev + 1);
@@ -24,38 +22,19 @@ export default function LivePoller() {
 
         const data = await res.json();
 
-        // New format: { live: [...], history: { fetched, inserted, error? } }
-        const alerts = Array.isArray(data?.live) ? data.live : (Array.isArray(data) ? data : []);
-        const history = data?.history;
-
-        if (alerts.length > 0) {
-          setLiveCount(alerts.length);
-          await fetch("/api/ingest", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(alerts),
-          });
+        if (data.error) {
+          setSyncInfo(`שגיאה: ${data.error}`);
         } else {
-          setLiveCount(0);
-        }
-
-        // Update history sync status
-        if (history) {
-          if (history.error) {
-            setHistoryStatus(`שגיאה: ${history.error}`);
-          } else {
-            const now = new Date().toLocaleTimeString("he-IL");
-            setLastHistorySync(now);
-            setHistoryStatus(
-              history.inserted > 0
-                ? `+${history.inserted} חדשות`
-                : `${history.fetched} בדיקה, הכל קיים`
-            );
-          }
+          const now = new Date().toLocaleTimeString("he-IL");
+          setLastSync(now);
+          setSyncInfo(
+            data.inserted > 0
+              ? `+${data.inserted} התרעות חדשות`
+              : `${data.fetched} נבדקו, הכל עדכני`
+          );
         }
 
         setStatus("idle");
-        setLastLivePoll(new Date().toLocaleTimeString("he-IL"));
         setErrorCount(0);
       } catch {
         setStatus("error");
@@ -64,7 +43,8 @@ export default function LivePoller() {
     }
 
     poll();
-    intervalRef.current = setInterval(poll, 15_000);
+    // Sync every 5 minutes (CSV updates roughly every hour)
+    intervalRef.current = setInterval(poll, 5 * 60 * 1000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -73,7 +53,7 @@ export default function LivePoller() {
 
   return (
     <div className="rounded-lg border border-[var(--card-border)] bg-[var(--card)] px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2">
         <div className="flex items-center gap-1.5">
           <span
             className={`w-2 h-2 rounded-full ${
@@ -86,40 +66,30 @@ export default function LivePoller() {
           />
           <span className="font-medium">
             {status === "polling"
-              ? "מעדכן..."
+              ? "מסנכרן..."
               : status === "error"
                 ? "שגיאת חיבור"
-                : "איסוף נתונים חיים"}
+                : "מעודכן"}
           </span>
         </div>
-
-        {liveCount > 0 && (
-          <span className="text-[var(--accent-red)] font-bold animate-pulse">
-            🚨 {liveCount} התרעות פעילות!
-          </span>
-        )}
       </div>
 
       <div className="flex items-center gap-4 text-gray-400">
         <span>
-          <span className="text-gray-500">עדכון (live):</span>{" "}
-          <span className="text-white font-mono">{lastLivePoll}</span>
+          <span className="text-gray-500">סנכרון אחרון:</span>{" "}
+          <span className="text-white font-mono">{lastSync}</span>
         </span>
-        <span>
-          <span className="text-gray-500">עדכון (היסטוריה):</span>{" "}
-          <span className="text-white font-mono">{lastHistorySync}</span>
-          {historyStatus && (
-            <span className={`mr-1 ${historyStatus.startsWith("שגיאה") ? "text-red-400" : "text-green-400"}`}>
-              {" "}({historyStatus})
-            </span>
-          )}
-        </span>
-        <span>
-          <span className="text-gray-500">שגיאות:</span>{" "}
-          <span className={`font-mono ${errorCount > 0 ? "text-red-400" : "text-white"}`}>
-            {errorCount}
+        {syncInfo && (
+          <span className={syncInfo.startsWith("שגיאה") ? "text-red-400" : "text-green-400"}>
+            {syncInfo}
           </span>
-        </span>
+        )}
+        {errorCount > 0 && (
+          <span>
+            <span className="text-gray-500">שגיאות:</span>{" "}
+            <span className="font-mono text-red-400">{errorCount}</span>
+          </span>
+        )}
       </div>
     </div>
   );

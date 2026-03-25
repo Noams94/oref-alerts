@@ -1,62 +1,103 @@
 import { NextResponse } from "next/server";
-import { LIVE_URL, HISTORY_URL, OREF_HEADERS, alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
+import { CSV_SOURCE_URL, alertHash, CAT_NAMES } from "@/lib/oref";
 import { insertAlert, ensureSchema } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-// Run in Frankfurt — OREF API blocks requests from US servers (403)
-export const preferredRegion = "fra1";
 
-interface OrefHistoryItem {
-  alertDate?: string;
-  data?: string;
-  title?: string;
-  category?: number;
-  category_desc?: string;
+/** Parse a CSV line respecting quoted fields */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
 }
 
 const CONCURRENCY = 20;
+// Only process the last N rows for quick sync
+const QUICK_TAIL = 5000;
 
-async function fetchAndIngestHistory(): Promise<{ fetched: number; inserted: number; error?: string }> {
+async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; error?: string }> {
   try {
-    const res = await fetch(HISTORY_URL, {
-      headers: OREF_HEADERS,
+    const csvRes = await fetch(CSV_SOURCE_URL, {
       signal: AbortSignal.timeout(30_000),
     });
-
-    if (!res.ok) {
-      return { fetched: 0, inserted: 0, error: `HTTP ${res.status}` };
+    if (!csvRes.ok) {
+      return { fetched: 0, inserted: 0, error: `CSV HTTP ${csvRes.status}` };
     }
 
-    const historyData: OrefHistoryItem[] = await res.json();
-    if (!Array.isArray(historyData) || historyData.length === 0) {
-      return { fetched: 0, inserted: 0, error: "empty response" };
-    }
+    const csvText = await csvRes.text();
+    const lines = csvText.trim().split("\n");
+    const header = parseCSVLine(lines[0]);
+
+    const cols: Record<string, number> = {};
+    header.forEach((h, i) => (cols[h.trim()] = i));
+
+    // Only process the tail of the CSV (most recent rows)
+    const startIdx = Math.max(1, lines.length - QUICK_TAIL);
 
     await ensureSchema();
     let inserted = 0;
+    let skipped = 0;
 
-    const tasks = historyData
-      .filter((a) => a.alertDate && a.data)
-      .map((a) => ({
-        alert_dt: toIsraelISO(a.alertDate!),
-        city: a.data!,
-        title: a.title ?? a.category_desc ?? CAT_NAMES[a.category ?? 0] ?? "התרעה",
-        category: a.category ?? 0,
-        cat_desc: a.category_desc ?? CAT_NAMES[a.category ?? 0] ?? "",
-        source: "live",
-        origin: "",
-        hash: alertHash(a.alertDate!, a.data!, a.title ?? a.category_desc ?? ""),
-      }));
+    type ParsedRow = {
+      alert_dt: string;
+      city: string;
+      title: string;
+      category: number;
+      cat_desc: string;
+      source: string;
+      origin: string;
+      hash: string;
+    };
 
-    for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-      const chunk = tasks.slice(i, i + CONCURRENCY);
+    const rows: ParsedRow[] = [];
+
+    for (let i = startIdx; i < lines.length; i++) {
+      const parts = parseCSVLine(lines[i]);
+      const city = parts[cols["cities"]] ?? "";
+      const dt = parts[cols["time"]] ?? "";
+      const cat = parseInt(parts[cols["threat"]] ?? "0", 10) || 0;
+      const title = parts[cols["description"]] ?? CAT_NAMES[cat] ?? "";
+      const origin = parts[cols["origin"]] ?? "";
+
+      if (!city || !dt) {
+        skipped++;
+        continue;
+      }
+
+      rows.push({
+        alert_dt: dt,
+        city,
+        title,
+        category: cat,
+        cat_desc: CAT_NAMES[cat] ?? title,
+        source: "csv",
+        origin,
+        hash: alertHash(dt, city, title),
+      });
+    }
+
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      const chunk = rows.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(chunk.map((row) => insertAlert(row)));
       for (const r of results) {
         if (r.status === "fulfilled" && r.value) inserted++;
       }
     }
 
-    return { fetched: tasks.length, inserted };
+    return { fetched: rows.length, inserted };
   } catch (e) {
     return { fetched: 0, inserted: 0, error: String(e) };
   }
@@ -64,32 +105,9 @@ async function fetchAndIngestHistory(): Promise<{ fetched: number; inserted: num
 
 export async function GET() {
   try {
-    // Fetch live alerts + history in parallel
-    const [liveRes, historyResult] = await Promise.all([
-      fetch(LIVE_URL, {
-        headers: OREF_HEADERS,
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => null),
-      fetchAndIngestHistory(),
-    ]);
-
-    let liveAlerts: unknown[] = [];
-    if (liveRes?.ok) {
-      const text = await liveRes.text();
-      const cleaned = text.replace(/^\ufeff/, "").trim();
-      if (cleaned && cleaned !== "[]") {
-        try {
-          liveAlerts = JSON.parse(cleaned);
-          if (!Array.isArray(liveAlerts)) liveAlerts = [];
-        } catch { liveAlerts = []; }
-      }
-    }
-
-    return NextResponse.json({
-      live: liveAlerts,
-      history: historyResult,
-    });
+    const syncResult = await quickSyncCSV();
+    return NextResponse.json(syncResult);
   } catch {
-    return NextResponse.json({ live: [], history: { fetched: 0, inserted: 0, error: "request failed" } });
+    return NextResponse.json({ fetched: 0, inserted: 0, error: "sync failed" });
   }
 }
