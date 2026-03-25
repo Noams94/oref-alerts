@@ -87,24 +87,68 @@ export const COORD_CSV_URL =
 // ─── Timezone ──────────────────────────────────────────────────────────────
 
 /**
+ * Find the last Friday of a given month/year (Israel DST starts last Friday of March)
+ */
+function lastFridayOf(year: number, month: number): number {
+  // Start from last day of month, walk backwards to Friday (day 5)
+  const d = new Date(Date.UTC(year, month + 1, 0)); // last day of month
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const diff = (day + 2) % 7; // days back to Friday (5)
+  return d.getUTCDate() - diff;
+}
+
+/**
+ * Find the last Sunday of a given month/year (Israel DST ends last Sunday of October)
+ */
+function lastSundayOf(year: number, month: number): number {
+  const d = new Date(Date.UTC(year, month + 1, 0));
+  const day = d.getUTCDay();
+  return d.getUTCDate() - day;
+}
+
+/**
+ * Check if a UTC date falls in Israel DST.
+ * Israel DST: last Friday of March at 02:00 → last Sunday of October at 02:00
+ */
+function isIsraelDST(d: Date): boolean {
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth(); // 0-indexed
+
+  // April(3) through September(9) — always DST
+  if (month >= 3 && month <= 8) return true;
+  // November(10) through February(1) — never DST
+  if (month >= 10 || month <= 1) return false;
+
+  // March (2): DST starts on last Friday at 02:00 local (00:00 UTC)
+  if (month === 2) {
+    const lastFri = lastFridayOf(year, 2);
+    const dstStart = new Date(Date.UTC(year, 2, lastFri, 0, 0, 0)); // 02:00 IST = 00:00 UTC
+    return d >= dstStart;
+  }
+
+  // October (9): DST ends on last Sunday at 02:00 local (23:00 UTC previous day, since still +3)
+  if (month === 9) {
+    const lastSun = lastSundayOf(year, 9);
+    const dstEnd = new Date(Date.UTC(year, 9, lastSun - 1, 23, 0, 0)); // 02:00 IST(+3) = 23:00 UTC prev day
+    return d < dstEnd;
+  }
+
+  return false;
+}
+
+/**
  * OREF API returns timestamps in Israel local time (no timezone info).
  * This function appends the Israel timezone offset so PostgreSQL stores them correctly.
- * e.g. "2026-03-24 20:51:00" → "2026-03-24T20:51:00+03:00"
+ * e.g. "2026-03-24 20:51:00" → "2026-03-24T20:51:00+02:00"
  */
 export function toIsraelISO(dt: string): string {
   // If already has timezone info, return as-is
   if (dt.includes("+") || dt.includes("Z") || dt.match(/\d{2}:\d{2}:\d{2}[+-]/)) {
     return dt;
   }
-  // Israel is UTC+2 in winter, UTC+3 in summer (DST)
-  // Check if date falls in DST (last Friday of March to last Sunday of October)
   try {
     const d = new Date(dt.replace(" ", "T") + "Z"); // parse as UTC temporarily
-    const month = d.getUTCMonth(); // 0-indexed
-    // Rough DST check: April-October = +3, November-March = +2
-    // (Israel DST starts last Friday of March, ends last Sunday of October)
-    const isDST = month >= 3 && month <= 9; // April(3) through October(9)
-    const offset = isDST ? "+03:00" : "+02:00";
+    const offset = isIsraelDST(d) ? "+03:00" : "+02:00";
     return dt.replace(" ", "T") + offset;
   } catch {
     return dt;
