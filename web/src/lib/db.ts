@@ -203,13 +203,14 @@ export async function insertAlert(alert: {
 }) {
   const sql = getSQL();
   try {
-    await sql`
+    const result = await sql`
       INSERT INTO alerts (alert_dt, city, title, category, cat_desc, source, origin, hash)
       VALUES (${alert.alert_dt}, ${alert.city}, ${alert.title}, ${alert.category},
               ${alert.cat_desc}, ${alert.source}, ${alert.origin ?? ""}, ${alert.hash})
       ON CONFLICT (hash) DO NOTHING
+      RETURNING id
     `;
-    return true;
+    return result.length > 0; // true only if actually inserted (not a duplicate)
   } catch {
     return false;
   }
