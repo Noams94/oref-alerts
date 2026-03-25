@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { CSV_SOURCE_URL, alertHash, CAT_NAMES } from "@/lib/oref";
-import { insertAlert, ensureSchema } from "@/lib/db";
+import { CSV_SOURCE_URL, alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
+import { upsertAlert, ensureSchema } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +78,7 @@ async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; erro
       }
 
       rows.push({
-        alert_dt: dt,
+        alert_dt: toIsraelISO(dt),
         city,
         title,
         category: cat,
@@ -91,7 +91,7 @@ async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; erro
 
     for (let i = 0; i < rows.length; i += CONCURRENCY) {
       const chunk = rows.slice(i, i + CONCURRENCY);
-      const results = await Promise.allSettled(chunk.map((row) => insertAlert(row)));
+      const results = await Promise.allSettled(chunk.map((row) => upsertAlert(row)));
       for (const r of results) {
         if (r.status === "fulfilled" && r.value) inserted++;
       }

@@ -191,6 +191,32 @@ export async function getDistinctOrigins() {
   return rows.filter((r) => VALID_ORIGINS.includes(r.origin as string));
 }
 
+/** Upsert: insert or update alert_dt on conflict (fixes timezone for existing rows) */
+export async function upsertAlert(alert: {
+  alert_dt: string;
+  city: string;
+  title: string;
+  category: number;
+  cat_desc: string;
+  source: string;
+  origin?: string;
+  hash: string;
+}) {
+  const sql = getSQL();
+  try {
+    const result = await sql`
+      INSERT INTO alerts (alert_dt, city, title, category, cat_desc, source, origin, hash)
+      VALUES (${alert.alert_dt}, ${alert.city}, ${alert.title}, ${alert.category},
+              ${alert.cat_desc}, ${alert.source}, ${alert.origin ?? ""}, ${alert.hash})
+      ON CONFLICT (hash) DO UPDATE SET alert_dt = EXCLUDED.alert_dt
+      RETURNING id
+    `;
+    return result.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function insertAlert(alert: {
   alert_dt: string;
   city: string;

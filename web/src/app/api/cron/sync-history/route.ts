@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { insertAlert, insertCoords, ensureSchema } from "@/lib/db";
-import { alertHash, CAT_NAMES, CSV_SOURCE_URL, COORD_CSV_URL } from "@/lib/oref";
+import { alertHash, CAT_NAMES, CSV_SOURCE_URL, COORD_CSV_URL, toIsraelISO } from "@/lib/oref";
 
 export const maxDuration = 300; // 5 minutes for large CSV import
 
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
       }
 
       rows.push({
-        alert_dt: dt,
+        alert_dt: toIsraelISO(dt),
         city,
         title,
         category: cat,
