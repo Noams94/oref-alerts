@@ -7,11 +7,12 @@ import { useEffect, useRef, useState } from "react";
  * Israeli edge → OREF). Then relay the data to /api/relay for DB storage.
  * This bypasses OREF's geo-restriction because the browser is in Israel.
  */
+const OREF_PROXY_URL = process.env.NEXT_PUBLIC_OREF_PROXY_URL || "";
+
 async function relayOrefHistory(): Promise<{ relayed: number; inserted: number } | null> {
+  if (!OREF_PROXY_URL) return null; // skip if no proxy configured
   try {
-    const res = await fetch("/oref-proxy/history", {
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-    });
+    const res = await fetch(OREF_PROXY_URL);
     if (!res.ok) return null;
 
     const text = await res.text();
