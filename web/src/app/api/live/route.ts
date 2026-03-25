@@ -3,6 +3,8 @@ import { LIVE_URL, HISTORY_URL, OREF_HEADERS, alertHash, CAT_NAMES, toIsraelISO 
 import { insertAlert, ensureSchema } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+// Run in Frankfurt — OREF API blocks requests from US servers (403)
+export const preferredRegion = "fra1";
 
 interface OrefHistoryItem {
   alertDate?: string;
