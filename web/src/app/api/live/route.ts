@@ -1,4 +1,4 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { LIVE_URL, HISTORY_URL, OREF_HEADERS, alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
 import { insertAlert, ensureSchema } from "@/lib/db";
 
@@ -12,25 +12,23 @@ interface OrefHistoryItem {
   category_desc?: string;
 }
 
-// Throttle history sync to once per 5 minutes
-let lastHistorySync = 0;
-const HISTORY_INTERVAL_MS = 5 * 60 * 1000;
 const CONCURRENCY = 20;
 
-async function syncHistory() {
-  const now = Date.now();
-  if (now - lastHistorySync < HISTORY_INTERVAL_MS) return 0;
-  lastHistorySync = now;
-
+async function fetchAndIngestHistory(): Promise<{ fetched: number; inserted: number; error?: string }> {
   try {
     const res = await fetch(HISTORY_URL, {
       headers: OREF_HEADERS,
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok) return 0;
+
+    if (!res.ok) {
+      return { fetched: 0, inserted: 0, error: `HTTP ${res.status}` };
+    }
 
     const historyData: OrefHistoryItem[] = await res.json();
-    if (!Array.isArray(historyData) || historyData.length === 0) return 0;
+    if (!Array.isArray(historyData) || historyData.length === 0) {
+      return { fetched: 0, inserted: 0, error: "empty response" };
+    }
 
     await ensureSchema();
     let inserted = 0;
@@ -56,23 +54,25 @@ async function syncHistory() {
       }
     }
 
-    if (inserted > 0) console.log(`History sync: ingested ${inserted} new alerts`);
-    return inserted;
-  } catch {
-    return 0;
+    return { fetched: tasks.length, inserted };
+  } catch (e) {
+    return { fetched: 0, inserted: 0, error: String(e) };
   }
 }
 
 export async function GET() {
   try {
-    // Quick live alerts fetch
-    const liveRes = await fetch(LIVE_URL, {
-      headers: OREF_HEADERS,
-      signal: AbortSignal.timeout(5_000),
-    });
+    // Fetch live alerts + history in parallel
+    const [liveRes, historyResult] = await Promise.all([
+      fetch(LIVE_URL, {
+        headers: OREF_HEADERS,
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => null),
+      fetchAndIngestHistory(),
+    ]);
 
     let liveAlerts: unknown[] = [];
-    if (liveRes.ok) {
+    if (liveRes?.ok) {
       const text = await liveRes.text();
       const cleaned = text.replace(/^\ufeff/, "").trim();
       if (cleaned && cleaned !== "[]") {
@@ -83,18 +83,11 @@ export async function GET() {
       }
     }
 
-    // Run history sync in the background AFTER response is sent
-    // Using after() ensures it completes even in serverless
-    after(async () => {
-      try {
-        await syncHistory();
-      } catch (e) {
-        console.error("Background history sync error:", e);
-      }
+    return NextResponse.json({
+      live: liveAlerts,
+      history: historyResult,
     });
-
-    return NextResponse.json(liveAlerts);
   } catch {
-    return NextResponse.json([]);
+    return NextResponse.json({ live: [], history: { fetched: 0, inserted: 0, error: "request failed" } });
   }
 }

@@ -5,6 +5,7 @@ export default function LivePoller() {
   const [status, setStatus] = useState<"idle" | "polling" | "error">("idle");
   const [lastLivePoll, setLastLivePoll] = useState<string>("—");
   const [lastHistorySync, setLastHistorySync] = useState<string>("—");
+  const [historyStatus, setHistoryStatus] = useState<string>("");
   const [liveCount, setLiveCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -13,7 +14,6 @@ export default function LivePoller() {
     async function poll() {
       setStatus("polling");
       try {
-        // Use server-side proxy to avoid CORS issues
         const res = await fetch("/api/live");
 
         if (!res.ok) {
@@ -22,21 +22,37 @@ export default function LivePoller() {
           return;
         }
 
-        const alerts = await res.json();
+        const data = await res.json();
 
-        if (!Array.isArray(alerts) || alerts.length === 0) {
-          setStatus("idle");
-          setLastLivePoll(new Date().toLocaleTimeString("he-IL"));
-          return;
+        // New format: { live: [...], history: { fetched, inserted, error? } }
+        const alerts = Array.isArray(data?.live) ? data.live : (Array.isArray(data) ? data : []);
+        const history = data?.history;
+
+        if (alerts.length > 0) {
+          setLiveCount(alerts.length);
+          await fetch("/api/ingest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(alerts),
+          });
+        } else {
+          setLiveCount(0);
         }
 
-        setLiveCount(alerts.length);
-
-        await fetch("/api/ingest", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(alerts),
-        });
+        // Update history sync status
+        if (history) {
+          if (history.error) {
+            setHistoryStatus(`שגיאה: ${history.error}`);
+          } else {
+            const now = new Date().toLocaleTimeString("he-IL");
+            setLastHistorySync(now);
+            setHistoryStatus(
+              history.inserted > 0
+                ? `+${history.inserted} חדשות`
+                : `${history.fetched} בדיקה, הכל קיים`
+            );
+          }
+        }
 
         setStatus("idle");
         setLastLivePoll(new Date().toLocaleTimeString("he-IL"));
@@ -46,22 +62,6 @@ export default function LivePoller() {
         setErrorCount((prev) => prev + 1);
       }
     }
-
-    // Check last history sync
-    fetch("/api/alerts?mode=stats")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.newest && data.newest !== "—") {
-          setLastHistorySync(
-            new Date(data.newest).toLocaleTimeString("he-IL", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            })
-          );
-        }
-      })
-      .catch(() => {});
 
     poll();
     intervalRef.current = setInterval(poll, 15_000);
@@ -108,6 +108,11 @@ export default function LivePoller() {
         <span>
           <span className="text-gray-500">עדכון (היסטוריה):</span>{" "}
           <span className="text-white font-mono">{lastHistorySync}</span>
+          {historyStatus && (
+            <span className={`mr-1 ${historyStatus.startsWith("שגיאה") ? "text-red-400" : "text-green-400"}`}>
+              {" "}({historyStatus})
+            </span>
+          )}
         </span>
         <span>
           <span className="text-gray-500">שגיאות:</span>{" "}
