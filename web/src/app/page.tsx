@@ -13,6 +13,10 @@ export default function Home() {
 
   const handleFilterChange = useCallback((q: string) => {
     setFilterQuery(q);
+    // Mirror filters into the URL so views can be bookmarked/shared.
+    // replaceState avoids flooding browser history on every tweak.
+    const url = q ? `?${q}` : window.location.pathname;
+    window.history.replaceState(null, "", url);
   }, []);
 
   // Close expanded map with Escape key

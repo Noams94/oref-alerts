@@ -35,7 +35,7 @@ async function relayOrefHistory(): Promise<{ relayed: number; inserted: number }
 }
 
 export default function LivePoller() {
-  const [status, setStatus] = useState<"idle" | "polling" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "polling" | "degraded" | "error">("idle");
   const [lastSync, setLastSync] = useState<string>("—");
   const [syncInfo, setSyncInfo] = useState<string>("");
   const [errorCount, setErrorCount] = useState(0);
@@ -49,11 +49,21 @@ export default function LivePoller() {
         const relay = await relayOrefHistory();
 
         // 2. Also sync from CSV as a fallback
-        const res = await fetch("/api/live");
-        const csvData = res.ok ? await res.json() : null;
+        const res = await fetch("/api/live").catch(() => null);
+        const csvData = res?.ok ? await res.json() : null;
 
         const totalInserted = (relay?.inserted ?? 0) + (csvData?.inserted ?? 0);
         const now = new Date().toLocaleTimeString("he-IL");
+
+        // Both sources failing returns nulls without throwing — don't report
+        // "up to date" when nothing was actually checked.
+        if (relay === null && csvData === null) {
+          setStatus("degraded");
+          setSyncInfo("מקורות הסנכרון לא הגיבו — הנתונים עשויים שלא להתעדכן");
+          setErrorCount((prev) => prev + 1);
+          return;
+        }
+
         setLastSync(now);
 
         if (relay && relay.inserted > 0) {
@@ -92,7 +102,9 @@ export default function LivePoller() {
                 ? "bg-yellow-400 animate-pulse"
                 : status === "error"
                   ? "bg-red-400"
-                  : "bg-green-400"
+                  : status === "degraded"
+                    ? "bg-amber-400"
+                    : "bg-green-400"
             }`}
           />
           <span className="font-medium">
@@ -100,7 +112,9 @@ export default function LivePoller() {
               ? "מסנכרן..."
               : status === "error"
                 ? "שגיאת חיבור"
-                : "מעודכן"}
+                : status === "degraded"
+                  ? "סנכרון לא זמין"
+                  : "מעודכן"}
           </span>
         </div>
       </div>
@@ -111,7 +125,7 @@ export default function LivePoller() {
           <span className="text-white font-mono">{lastSync}</span>
         </span>
         {syncInfo && (
-          <span className={syncInfo.startsWith("שגיאה") ? "text-red-400" : "text-green-400"}>
+          <span className={status === "degraded" || status === "error" ? "text-amber-400" : "text-green-400"}>
             {syncInfo}
           </span>
         )}

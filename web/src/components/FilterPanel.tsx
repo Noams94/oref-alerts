@@ -70,6 +70,26 @@ export default function FilterPanel({
   const cityInputRef = useRef<HTMLInputElement>(null);
   const cityDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Restore filters from the URL once on mount so filtered views can be
+  // bookmarked and shared (page.tsx mirrors filter state back into the URL).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const restored: FilterState = {
+      date_from: params.get("date_from") ?? "",
+      date_to: params.get("date_to") ?? "",
+      city: params.get("city") ?? "",
+      types: params.get("types")?.split(",").filter(Boolean) ?? [],
+      origins: params.get("origins")?.split(",").filter(Boolean) ?? [],
+    };
+    const hasAny = Object.values(restored).some((v) => (Array.isArray(v) ? v.length > 0 : v !== ""));
+    if (hasAny) {
+      setFilters(restored);
+      if (restored.city) setCityQuery(restored.city);
+      setActivePreset("");
+      setOpen(true);
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/alerts?mode=types")
       .then((r) => r.json())
