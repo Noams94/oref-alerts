@@ -279,6 +279,34 @@ export async function insertAlertsBatch(rows: AlertRow[]): Promise<number> {
   }
 }
 
+/** Batch upsert up to ~200 rows at a time using unnest arrays.
+ *  Same conflict semantics as upsertAlert: refresh alert_dt on hash conflict. */
+export async function upsertAlertsBatch(rows: AlertRow[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const sql = getSQL();
+  try {
+    const result = await sql`
+      INSERT INTO alerts (alert_dt, city, title, category, cat_desc, source, origin, hash)
+      SELECT * FROM unnest(
+        ${rows.map((r) => r.alert_dt)}::timestamptz[],
+        ${rows.map((r) => r.city)}::text[],
+        ${rows.map((r) => r.title)}::text[],
+        ${rows.map((r) => r.category)}::integer[],
+        ${rows.map((r) => r.cat_desc)}::text[],
+        ${rows.map((r) => r.source)}::text[],
+        ${rows.map((r) => r.origin)}::text[],
+        ${rows.map((r) => r.hash)}::text[]
+      )
+      ON CONFLICT (hash) DO UPDATE SET alert_dt = EXCLUDED.alert_dt
+      RETURNING id
+    `;
+    return result.length;
+  } catch (e) {
+    console.error("Batch upsert error:", e);
+    return 0;
+  }
+}
+
 export async function insertCoords(
   coords: Array<{ city: string; lat: number; lon: number }>
 ) {
