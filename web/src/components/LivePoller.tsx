@@ -9,6 +9,10 @@ import { useEffect, useRef, useState } from "react";
  */
 const OREF_PROXY_URL = process.env.NEXT_PUBLIC_OREF_PROXY_URL || "";
 
+// Poll every 5 minutes; skip while the tab is hidden so background tabs
+// don't keep the server (and the Vercel CPU meter) busy.
+const POLL_INTERVAL_MS = 5 * 60 * 1000;
+
 async function relayOrefHistory(): Promise<{ relayed: number; inserted: number } | null> {
   if (!OREF_PROXY_URL) return null; // skip if no proxy configured
   try {
@@ -43,6 +47,8 @@ export default function LivePoller() {
 
   useEffect(() => {
     async function poll() {
+      // Skip background tabs; we poll again when the tab becomes visible
+      if (document.hidden) return;
       setStatus("polling");
       try {
         // 1. Try real-time relay from OREF via browser (Israeli IP)
@@ -84,11 +90,17 @@ export default function LivePoller() {
     }
 
     poll();
-    // Poll every 2 minutes — OREF relay is near real-time
-    intervalRef.current = setInterval(poll, 2 * 60 * 1000);
+    intervalRef.current = setInterval(poll, POLL_INTERVAL_MS);
+
+    // Sync promptly when the user returns to the tab
+    function onVisibilityChange() {
+      if (!document.hidden) poll();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
