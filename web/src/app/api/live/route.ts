@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CSV_SOURCE_URL, alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
-import { upsertAlert, ensureSchema } from "@/lib/db";
+import { upsertAlertsBatch, ensureSchema } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +24,22 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-const CONCURRENCY = 20;
+// Batch size for unnest-based bulk upserts (one DB round trip per chunk)
+const BATCH_SIZE = 200;
 // Only process the last N rows for quick sync
-const QUICK_TAIL = 5000;
+const QUICK_TAIL = 1000;
+// Server-side throttle: reuse the last sync result for this long.
+// The instance serves repeat calls (every open tab polls) without
+// re-downloading the CSV or touching the DB.
+const SYNC_THROTTLE_MS = 5 * 60 * 1000;
 
-async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; error?: string }> {
+type SyncResult = { fetched: number; inserted: number; error?: string };
+
+let lastSyncAt = 0;
+let lastResult: SyncResult | null = null;
+let inFlight: Promise<SyncResult> | null = null;
+
+async function quickSyncCSV(): Promise<SyncResult> {
   try {
     const csvRes = await fetch(CSV_SOURCE_URL, {
       signal: AbortSignal.timeout(30_000),
@@ -89,12 +100,8 @@ async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; erro
       });
     }
 
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
-      const results = await Promise.allSettled(chunk.map((row) => upsertAlert(row)));
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value) inserted++;
-      }
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      inserted += await upsertAlertsBatch(rows.slice(i, i + BATCH_SIZE));
     }
 
     return { fetched: rows.length, inserted };
@@ -104,10 +111,26 @@ async function quickSyncCSV(): Promise<{ fetched: number; inserted: number; erro
 }
 
 export async function GET() {
-  try {
-    const syncResult = await quickSyncCSV();
-    return NextResponse.json(syncResult);
-  } catch {
-    return NextResponse.json({ fetched: 0, inserted: 0, error: "sync failed" });
+  // Serve the cached result if the last sync is fresh enough
+  if (lastResult && Date.now() - lastSyncAt < SYNC_THROTTLE_MS) {
+    return NextResponse.json({ ...lastResult, throttled: true });
   }
+
+  // De-duplicate concurrent calls (multiple open tabs) onto one sync
+  if (!inFlight) {
+    inFlight = quickSyncCSV()
+      .then((result) => {
+        lastSyncAt = Date.now();
+        lastResult = result;
+        inFlight = null;
+        return result;
+      })
+      .catch(() => {
+        inFlight = null;
+        return { fetched: 0, inserted: 0, error: "sync failed" };
+      });
+  }
+
+  const syncResult = await inFlight;
+  return NextResponse.json(syncResult);
 }
