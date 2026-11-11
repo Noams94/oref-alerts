@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertAlert, ensureSchema } from "@/lib/db";
+import { upsertAlertsBatch, ensureSchema } from "@/lib/db";
 import { alertHash, CAT_NAMES, toIsraelISO } from "@/lib/oref";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
  * via the /oref-proxy/history rewrite from an Israeli IP).
  */
 
-const CONCURRENCY = 20;
+// Batch size for unnest-based bulk upserts (one DB round trip per chunk)
+const BATCH_SIZE = 200;
 
 interface OrefHistoryItem {
   data: string; // city name
@@ -73,12 +74,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
-      const results = await Promise.allSettled(chunk.map((r) => upsertAlert(r)));
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value) inserted++;
-      }
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      inserted += await upsertAlertsBatch(rows.slice(i, i + BATCH_SIZE));
     }
 
     return NextResponse.json({ relayed: rows.length, inserted });
